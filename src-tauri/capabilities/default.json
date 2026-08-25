@@ -9,6 +9,7 @@
     "core:window:allow-hide",
     "core:window:allow-set-focus",
     "core:window:allow-close",
+    "core:window:allow-start-dragging",
     "core:event:default",
     "dialog:default",
     "clipboard-manager:allow-write-text",

@@ -1,11 +1,12 @@
 {
   "name": "promptdock",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
+    "test": "node --experimental-strip-types --test tests/frontend-utils.test.ts",
     "tauri": "tauri"
   },
   "dependencies": {

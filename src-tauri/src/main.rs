@@ -1,13 +1,15 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::fs;
 use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{
-    AppHandle, Emitter, Manager,
-    webview::WebviewWindowBuilder,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
+    webview::WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, Theme,
 };
 
 pub struct DbState(pub Mutex<Connection>);
@@ -27,19 +29,17 @@ pub struct Prompt {
     pub updated_at: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub hotkey: String,
     pub autostart: bool,
     pub theme: String,
+    pub language: String,
 }
 
 fn init_db(app: &AppHandle) -> Connection {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .expect("无法获取数据目录");
+    let dir = app.path().app_data_dir().expect("无法获取数据目录");
     fs::create_dir_all(&dir).ok();
     let conn = Connection::open(dir.join("prompts.db")).expect("无法打开数据库");
     conn.execute_batch(
@@ -54,6 +54,10 @@ fn init_db(app: &AppHandle) -> Connection {
             last_used_at INTEGER,
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            k TEXT PRIMARY KEY,
+            v TEXT NOT NULL
         );",
     )
     .expect("建表失败");
@@ -63,14 +67,14 @@ fn init_db(app: &AppHandle) -> Connection {
         .unwrap_or(0);
     if count == 0 {
         for p in default_prompts() {
-            insert_prompt(&conn, &p);
+            insert_prompt(&conn, &p).expect("写入默认 Prompt 失败");
         }
     }
     conn
 }
 
-fn insert_prompt(conn: &Connection, p: &Prompt) {
-    let _ = conn.execute(
+fn insert_prompt(conn: &Connection, p: &Prompt) -> rusqlite::Result<()> {
+    conn.execute(
         "INSERT OR REPLACE INTO prompts (id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![
@@ -85,7 +89,8 @@ fn insert_prompt(conn: &Connection, p: &Prompt) {
             p.created_at,
             p.updated_at
         ],
-    );
+    )
+    .map(|_| ())
 }
 
 fn row_to_prompt(row: &rusqlite::Row) -> rusqlite::Result<Prompt> {
@@ -119,13 +124,25 @@ fn prompts_from_json(data: &serde_json::Value) -> Vec<Prompt> {
                     Some(Prompt {
                         id: p.get("id")?.as_str()?.to_string(),
                         title: p.get("title")?.as_str()?.to_string(),
-                        body: p.get("body").and_then(|b| b.as_str()).unwrap_or("").to_string(),
+                        body: p
+                            .get("body")
+                            .and_then(|b| b.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         tags: p
                             .get("tags")
                             .and_then(|t| t.as_array())
-                            .map(|a| a.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                            .map(|a| {
+                                a.iter()
+                                    .filter_map(|t| t.as_str().map(String::from))
+                                    .collect()
+                            })
                             .unwrap_or_default(),
-                        folder: p.get("folder").and_then(|f| f.as_str()).unwrap_or("").to_string(),
+                        folder: p
+                            .get("folder")
+                            .and_then(|f| f.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         favorite: p.get("favorite").and_then(|f| f.as_bool()).unwrap_or(false),
                         use_count: p.get("useCount").and_then(|v| v.as_i64()).unwrap_or(0),
                         last_used_at: p.get("lastUsedAt").and_then(|v| v.as_i64()),
@@ -147,8 +164,8 @@ fn list_prompts(state: tauri::State<DbState>) -> Result<Vec<Prompt>, String> {
     let list = stmt
         .query_map([], row_to_prompt)
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
     Ok(list)
 }
 
@@ -161,11 +178,15 @@ fn save_prompt(state: tauri::State<DbState>, mut prompt: Prompt) -> Result<Promp
         prompt.created_at = now;
     } else {
         prompt.created_at = conn
-            .query_row("SELECT created_at FROM prompts WHERE id=?1", [&prompt.id], |r| r.get(0))
+            .query_row(
+                "SELECT created_at FROM prompts WHERE id=?1",
+                [&prompt.id],
+                |r| r.get(0),
+            )
             .unwrap_or(now);
     }
     prompt.updated_at = now;
-    insert_prompt(&conn, &prompt);
+    insert_prompt(&conn, &prompt).map_err(|e| e.to_string())?;
     Ok(prompt)
 }
 
@@ -204,51 +225,145 @@ fn chrono_now() -> i64 {
 #[tauri::command]
 fn get_settings(state: tauri::State<DbState>) -> Result<Settings, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
+    Ok(read_settings(&conn))
+}
+
+fn default_settings() -> Settings {
+    Settings {
+        hotkey: "ctrl+shift+space".into(),
+        autostart: false,
+        theme: "auto".into(),
+        language: "auto".into(),
+    }
+}
+
+fn read_settings(conn: &Connection) -> Settings {
     let get = |k: &str| -> String {
         conn.query_row("SELECT v FROM settings WHERE k=?1", [k], |r| r.get(0))
             .unwrap_or_default()
     };
-    Ok(Settings {
-        hotkey: if get("hotkey").is_empty() { "ctrl+shift+space".into() } else { get("hotkey") },
+    Settings {
+        hotkey: {
+            let value = get("hotkey");
+            if value.is_empty() {
+                "ctrl+shift+space".into()
+            } else {
+                value
+            }
+        },
         autostart: get("autostart") == "1",
         theme: {
-            let t = get("theme");
-            if t.is_empty() { "auto".into() } else { t }
+            let value = get("theme");
+            if matches!(value.as_str(), "auto" | "light" | "dark") {
+                value
+            } else {
+                "auto".into()
+            }
         },
-    })
+        language: {
+            let value = get("language");
+            if matches!(value.as_str(), "auto" | "zh" | "en") {
+                value
+            } else {
+                "auto".into()
+            }
+        },
+    }
 }
 
 #[tauri::command]
-fn set_settings(app: AppHandle, state: tauri::State<DbState>, settings: Settings) -> Result<(), String> {
-    {
-        let conn = state.0.lock().map_err(|e| e.to_string())?;
-        conn.execute_batch("CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL);")
-            .map_err(|e| e.to_string())?;
-        for (k, v) in [("hotkey", settings.hotkey.clone()), ("autostart", if settings.autostart { "1" } else { "0" }.into()), ("theme", settings.theme.clone())] {
-            let _ = conn.execute("INSERT OR REPLACE INTO settings (k,v) VALUES (?1,?2)", params![k, v]);
-        }
+fn set_settings(
+    app: AppHandle,
+    state: tauri::State<DbState>,
+    settings: Settings,
+) -> Result<(), String> {
+    if !matches!(settings.theme.as_str(), "auto" | "light" | "dark") {
+        return Err("settings.invalid_theme".into());
     }
-    apply_hotkey(&app, &settings.hotkey)?;
+    if !matches!(settings.language.as_str(), "auto" | "zh" | "en") {
+        return Err("settings.invalid_language".into());
+    }
+
+    let previous = {
+        let conn = state.0.lock().map_err(|e| e.to_string())?;
+        read_settings(&conn)
+    };
+
+    replace_hotkey(&app, &previous.hotkey, &settings.hotkey)?;
+
+    let save_result = (|| -> Result<(), String> {
+        let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        for (key, value) in [
+            ("hotkey", settings.hotkey.clone()),
+            (
+                "autostart",
+                if settings.autostart { "1" } else { "0" }.into(),
+            ),
+            ("theme", settings.theme.clone()),
+            ("language", settings.language.clone()),
+        ] {
+            tx.execute(
+                "INSERT OR REPLACE INTO settings (k,v) VALUES (?1,?2)",
+                params![key, value],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())
+    })();
+
+    if let Err(error) = save_result {
+        let _ = replace_hotkey(&app, &settings.hotkey, &previous.hotkey);
+        return Err(error);
+    }
+
     apply_autostart(&app, settings.autostart);
+    apply_window_preferences(&app, &settings);
+    update_tray_menu(&app, &settings)?;
+    app.emit("settings-changed", settings)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-fn apply_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
+fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-    let gs = app.global_shortcut();
-    let current = get_settings_inner(app);
-    if !current.hotkey.is_empty() {
-        if let Ok(old) = Shortcut::try_from(current.hotkey.as_str()) {
-            let _ = gs.unregister(old);
-        }
-    }
     let sc = Shortcut::try_from(hotkey).map_err(|e| e.to_string())?;
-    gs.on_shortcut(sc, |app, _shortcut, event| {
-        if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-            toggle_main(app);
-        }
-    })
-    .map_err(|e| e.to_string())
+    app.global_shortcut()
+        .on_shortcut(sc, |app, _shortcut, event| {
+            if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                toggle_main(app);
+            }
+        })
+        .map_err(|e| e.to_string())
+}
+
+fn replace_hotkey(app: &AppHandle, old_hotkey: &str, new_hotkey: &str) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+    let new_shortcut = Shortcut::try_from(new_hotkey).map_err(|e| e.to_string())?;
+    if old_hotkey.eq_ignore_ascii_case(new_hotkey) {
+        return Ok(());
+    }
+
+    if let Ok(old_shortcut) = Shortcut::try_from(old_hotkey) {
+        app.global_shortcut()
+            .unregister(old_shortcut)
+            .map_err(|e| e.to_string())?;
+    }
+
+    let result = app
+        .global_shortcut()
+        .on_shortcut(new_shortcut, |app, _shortcut, event| {
+            if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                toggle_main(app);
+            }
+        });
+
+    if let Err(error) = result {
+        let _ = register_hotkey(app, old_hotkey);
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 fn get_settings_inner(app: &AppHandle) -> Settings {
@@ -256,27 +371,82 @@ fn get_settings_inner(app: &AppHandle) -> Settings {
         .0
         .lock()
         .ok()
-        .and_then(|conn| {
-            let get = |k: &str| -> String {
-                conn.query_row("SELECT v FROM settings WHERE k=?1", [k], |r| r.get(0))
-                    .unwrap_or_default()
-            };
-            Ok(Settings {
-                hotkey: if get("hotkey").is_empty() { "ctrl+shift+space".into() } else { get("hotkey") },
-                autostart: get("autostart") == "1",
-                theme: {
-                    let t = get("theme");
-                    if t.is_empty() { "auto".into() } else { t }
-                },
-            })
-        })
-        .unwrap_or(Settings { hotkey: "ctrl+shift+space".into(), autostart: false, theme: "auto".into() })
+        .map(|conn| read_settings(&conn))
+        .unwrap_or_else(default_settings)
 }
 
 fn apply_autostart(app: &AppHandle, enable: bool) {
-    use tauri_plugin_autostart::{AutoLaunchManager, MacosLauncher};
+    use tauri_plugin_autostart::AutoLaunchManager;
     let manager = app.state::<AutoLaunchManager>();
-    let _ = if enable { manager.enable() } else { manager.disable() };
+    let _ = if enable {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+}
+
+fn use_chinese(language: &str) -> bool {
+    match language {
+        "zh" => true,
+        "en" => false,
+        _ => sys_locale::get_locale()
+            .map(|locale| locale.to_ascii_lowercase().starts_with("zh"))
+            .unwrap_or(false),
+    }
+}
+
+fn manager_title(settings: &Settings) -> &'static str {
+    if use_chinese(&settings.language) {
+        "PromptDock 管理器"
+    } else {
+        "PromptDock Manager"
+    }
+}
+
+fn window_theme(theme: &str) -> Option<Theme> {
+    match theme {
+        "light" => Some(Theme::Light),
+        "dark" => Some(Theme::Dark),
+        _ => None,
+    }
+}
+
+fn apply_window_preferences(app: &AppHandle, settings: &Settings) {
+    let theme = window_theme(&settings.theme);
+    for window in app.webview_windows().values() {
+        let _ = window.set_theme(theme);
+    }
+    if let Some(manager) = app.get_webview_window("manager") {
+        let _ = manager.set_title(manager_title(settings));
+    }
+}
+
+fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<tauri::Wry>> {
+    let (open_label, call_label, quit_label) = if use_chinese(&settings.language) {
+        (
+            "打开 Prompt 管理".to_string(),
+            format!("调用 Prompt ({})", settings.hotkey),
+            "退出".to_string(),
+        )
+    } else {
+        (
+            "Open Prompt Manager".to_string(),
+            format!("Call Prompt ({})", settings.hotkey),
+            "Quit".to_string(),
+        )
+    };
+    let open = MenuItem::with_id(app, "open", open_label, true, None::<&str>)?;
+    let call = MenuItem::with_id(app, "call", call_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &call, &quit])
+}
+
+fn update_tray_menu(app: &AppHandle, settings: &Settings) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let menu = build_tray_menu(app, settings).map_err(|e| e.to_string())?;
+        tray.set_menu(Some(menu)).map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 fn toggle_main(app: &AppHandle) {
@@ -284,13 +454,12 @@ fn toggle_main(app: &AppHandle) {
         if win.is_visible().unwrap_or(false) {
             let _ = win.hide();
         } else {
-            if let Ok(monitor) = win.current_monitor() {
-                if let Some(m) = monitor {
-                    let _ = win.set_position(tauri::PhysicalPosition::new(
-                        m.position().x + (m.size().width - win.outer_size().unwrap_or_default().width) / 2,
-                        m.position().y + (m.size().height - win.outer_size().unwrap_or_default().height) / 3,
-                    ));
-                }
+            if let Ok(Some(m)) = win.current_monitor() {
+                let window_size = win.outer_size().unwrap_or_default();
+                let _ = win.set_position(tauri::PhysicalPosition::new(
+                    m.position().x + (m.size().width as i32 - window_size.width as i32) / 2,
+                    m.position().y + (m.size().height as i32 - window_size.height as i32) / 3,
+                ));
             }
             let _ = win.show();
             let _ = win.set_focus();
@@ -308,6 +477,7 @@ fn hide_main(app: AppHandle) {
 
 #[tauri::command]
 fn open_manager(app: AppHandle) {
+    let settings = get_settings_inner(&app);
     match app.get_webview_window("manager") {
         Some(win) => {
             let _ = win.show();
@@ -319,7 +489,8 @@ fn open_manager(app: AppHandle) {
                 "manager",
                 tauri::WebviewUrl::App("index.html?window=manager".into()),
             )
-            .title("PromptDock 管理器")
+            .title(manager_title(&settings))
+            .theme(window_theme(&settings.theme))
             .inner_size(1080.0, 720.0)
             .min_inner_size(860.0, 560.0)
             .build();
@@ -336,29 +507,72 @@ fn export_prompts(state: tauri::State<DbState>, path: String) -> Result<(), Stri
         "exportedAt": chrono_now(),
         "prompts": prompts,
     });
-    fs::write(&path, serde_json::to_string_pretty(&doc).unwrap_or_default()).map_err(|e| e.to_string())
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&doc).unwrap_or_default(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn validate_import_document(data: &serde_json::Value) -> Result<Vec<Prompt>, String> {
+    let format = data
+        .get("format")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "import.missing_format".to_string())?;
+    if !matches!(format, "promptdeck" | "promptdock") {
+        return Err("import.unsupported_format".into());
+    }
+    if data.get("version").and_then(|value| value.as_u64()) != Some(1) {
+        return Err("import.unsupported_version".into());
+    }
+    let prompt_values = data
+        .get("prompts")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| "import.missing_prompts".to_string())?;
+    let prompts: Vec<Prompt> = prompt_values
+        .iter()
+        .cloned()
+        .map(serde_json::from_value)
+        .collect::<Result<_, _>>()
+        .map_err(|_| "import.invalid_prompt".to_string())?;
+    if prompts.is_empty() {
+        return Err("import.no_prompts".into());
+    }
+    Ok(prompts)
 }
 
 #[tauri::command]
-fn import_prompts(state: tauri::State<DbState>, path: String, replace: bool) -> Result<usize, String> {
-    let content = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let data: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
-    let prompts = prompts_from_json(&data);
-    if prompts.is_empty() {
-        return Err("文件中没有可导入的 Prompt".into());
-    }
-    let conn = state.0.lock().map_err(|e| e.to_string())?;
+fn import_prompts(
+    state: tauri::State<DbState>,
+    path: String,
+    replace: bool,
+) -> Result<usize, String> {
+    let content = fs::read_to_string(&path).map_err(|e| format!("import.read_failed:{e}"))?;
+    let data: serde_json::Value =
+        serde_json::from_str(&content).map_err(|_| "import.invalid_json".to_string())?;
+    let prompts = validate_import_document(&data)?;
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
     if replace {
-        conn.execute("DELETE FROM prompts", []).map_err(|e| e.to_string())?;
+        tx.execute("DELETE FROM prompts", [])
+            .map_err(|e| e.to_string())?;
     }
     for p in &prompts {
-        insert_prompt(&conn, p);
+        insert_prompt(&tx, p).map_err(|e| e.to_string())?;
     }
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(prompts.len())
 }
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+                let _ = app.emit("main-shown", ());
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -380,13 +594,12 @@ pub fn run() {
             import_prompts
         ])
         .setup(|app| {
-            let conn = init_db(app);
+            let app_handle = app.handle().clone();
+            let conn = init_db(&app_handle);
             app.manage(DbState(Mutex::new(conn)));
 
-            let open = MenuItem::with_id(app, "open", "打开 Prompt 管理", true, None::<&str>)?;
-            let call = MenuItem::with_id(app, "call", "调用 Prompt (Ctrl+Shift+Space)", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &call, &quit])?;
+            let settings = get_settings_inner(&app_handle);
+            let menu = build_tray_menu(&app_handle, &settings)?;
 
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().unwrap().clone())
@@ -400,11 +613,102 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            let settings = get_settings_inner(app);
-            apply_hotkey(app, &settings.hotkey)?;
-            apply_autostart(app, settings.autostart);
+            register_hotkey(&app_handle, &settings.hotkey)?;
+            apply_autostart(&app_handle, settings.autostart);
+            apply_window_preferences(&app_handle, &settings);
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn main() {
+    run();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn import_document(format: Option<&str>, version: u64) -> serde_json::Value {
+        let mut document = serde_json::json!({
+            "version": version,
+            "prompts": [{
+                "id": "test-id",
+                "title": "Test prompt",
+                "body": "Hello {{name}}",
+                "tags": ["test"],
+                "folder": "Tests",
+                "favorite": false,
+                "useCount": 0,
+                "lastUsedAt": null,
+                "createdAt": 1,
+                "updatedAt": 1
+            }]
+        });
+        if let Some(format) = format {
+            document["format"] = serde_json::Value::String(format.into());
+        }
+        document
+    }
+
+    #[test]
+    fn bundled_defaults_contain_only_the_five_approved_prompts() {
+        let prompts = default_prompts();
+        let titles: HashSet<_> = prompts.iter().map(|prompt| prompt.title.as_str()).collect();
+        let expected = HashSet::from([
+            "提示词标准化",
+            "Code review",
+            "Explain this code",
+            "Brainstorm ideas",
+            "Cold outreach email",
+        ]);
+        assert_eq!(prompts.len(), 5);
+        assert_eq!(titles, expected);
+    }
+
+    #[test]
+    fn import_accepts_promptdeck_and_promptdock_v1() {
+        assert!(validate_import_document(&import_document(Some("promptdeck"), 1)).is_ok());
+        assert!(validate_import_document(&import_document(Some("promptdock"), 1)).is_ok());
+    }
+
+    #[test]
+    fn import_rejects_missing_unknown_and_unsupported_formats() {
+        assert_eq!(
+            validate_import_document(&import_document(None, 1)).unwrap_err(),
+            "import.missing_format"
+        );
+        assert_eq!(
+            validate_import_document(&import_document(Some("other"), 1)).unwrap_err(),
+            "import.unsupported_format"
+        );
+        assert_eq!(
+            validate_import_document(&import_document(Some("promptdeck"), 2)).unwrap_err(),
+            "import.unsupported_version"
+        );
+
+        let mut invalid_prompt = import_document(Some("promptdeck"), 1);
+        invalid_prompt["prompts"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("body");
+        assert_eq!(
+            validate_import_document(&invalid_prompt).unwrap_err(),
+            "import.invalid_prompt"
+        );
+    }
+
+    #[test]
+    fn old_databases_receive_safe_setting_defaults() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE settings (k TEXT PRIMARY KEY, v TEXT NOT NULL);")
+            .unwrap();
+        let settings = read_settings(&conn);
+        assert_eq!(settings.hotkey, "ctrl+shift+space");
+        assert_eq!(settings.theme, "auto");
+        assert_eq!(settings.language, "auto");
+        assert!(!settings.autostart);
+    }
 }

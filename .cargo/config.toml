@@ -1,0 +1,4 @@
+[build]
+# 将 Cargo/Tauri 的所有编译产物集中到仓库根目录的 release 文件夹。
+# 发布安装包位于 release/release/bundle/nsis/。
+target-dir = "release"

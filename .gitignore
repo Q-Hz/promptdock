@@ -3,9 +3,11 @@ node_modules/
 .npmcache/
 
 # 构建产物
-dist/
-src-tauri/target/
-src-tauri/gen/
+/dist/
+/release/
+/src-tauri/target/
+/src-tauri/gen/
+release-artifacts/
 
 # 系统文件
 .DS_Store
@@ -18,3 +20,28 @@ Thumbs.db
 *.suo
 *.user
 *.sln.docstates
+
+# 本地文档
+docs/
+
+# 环境变量和本地配置
+.env
+.env.*
+!.env.example
+
+# 本地数据库
+*.db
+*.sqlite
+*.sqlite3
+
+# 证书和私钥
+*.pem
+*.key
+*.pfx
+*.p12
+
+# 临时与调试文件
+*.tmp
+*.bak
+*.dmp
+*.pdb

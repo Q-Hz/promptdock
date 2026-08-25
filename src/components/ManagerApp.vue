@@ -2,8 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 import {
   api, filterPrompts, parseVariables, sortPrompts,
-  type Prompt, type Settings,
+  type Prompt,
 } from "../lib/api";
+import { t, translateApiError } from "../lib/i18n";
 import SettingsModal from "./SettingsModal.vue";
 
 const prompts = ref<Prompt[]>([]);
@@ -25,7 +26,7 @@ function emptyPrompt(): Prompt {
 const folders = computed(() => {
   const map = new Map<string, Prompt[]>();
   for (const p of filtered.value) {
-    const key = p.folder || "未分类";
+    const key = p.folder || t("uncategorized");
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(p);
   }
@@ -56,16 +57,25 @@ function newPrompt() {
 
 async function save() {
   if (!editing.value.title.trim()) return;
-  const saved = await api.savePrompt(editing.value);
-  await reload();
-  select(saved);
+  try {
+    const saved = await api.savePrompt(editing.value);
+    await reload();
+    select(saved);
+  } catch (error) {
+    alert(t("operationFailed", { error: translateApiError(error) }));
+  }
 }
 
 async function remove() {
   if (!selectedId.value) return;
-  await api.deletePrompt(selectedId.value);
-  await reload();
-  newPrompt();
+  if (!confirm(t("deleteConfirm", { title: editing.value.title }))) return;
+  try {
+    await api.deletePrompt(selectedId.value);
+    await reload();
+    newPrompt();
+  } catch (error) {
+    alert(t("operationFailed", { error: translateApiError(error) }));
+  }
 }
 
 async function toggleFavorite() {
@@ -89,7 +99,13 @@ async function doExport() {
     defaultPath: `promptdock-${new Date().toISOString().slice(0, 10)}.json`,
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
-  if (path) await api.exportPrompts(path);
+  if (!path) return;
+  try {
+    await api.exportPrompts(path);
+    alert(t("exportSuccess"));
+  } catch (error) {
+    alert(t("operationFailed", { error: translateApiError(error) }));
+  }
 }
 
 async function doImport() {
@@ -99,14 +115,19 @@ async function doImport() {
     multiple: false,
   });
   if (!path) return;
-  const replace = await ask("是否覆盖现有 Prompt？（否 = 追加合并）", {
-    title: "导入 Prompt",
+  const replace = await ask(t("importConfirmMessage"), {
+    title: t("importConfirmTitle"),
     kind: "info",
-    okLabel: "覆盖",
-    cancelLabel: "追加",
+    okLabel: t("replace"),
+    cancelLabel: t("merge"),
   });
-  await api.importPrompts(path as string, replace);
-  await reload();
+  try {
+    const count = await api.importPrompts(path as string, replace);
+    await reload();
+    alert(t("importSuccess", { count }));
+  } catch (error) {
+    alert(t("operationFailed", { error: translateApiError(error) }));
+  }
 }
 </script>
 
@@ -116,12 +137,12 @@ async function doImport() {
     <header class="flex items-center gap-3 border-b border-neutral-200 px-4 py-2.5 dark:border-neutral-700">
       <div class="mr-auto">
         <h1 class="text-base font-bold">PromptDock</h1>
-        <p class="text-[11px] text-neutral-400">本地优先的 Prompt 管理与调用工具</p>
+        <p class="text-[11px] text-neutral-400">{{ t("managerTagline") }}</p>
       </div>
-      <button class="rounded-md bg-blue-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="newPrompt">+ New</button>
-      <button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="doImport">Import</button>
-      <button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="doExport">Export</button>
-      <button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="showSettings = true">⚙ 设置</button>
+      <button class="rounded-md bg-blue-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="newPrompt">{{ t("newPrompt") }}</button>
+      <button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="doImport">{{ t("import") }}</button>
+      <button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="doExport">{{ t("export") }}</button>
+      <button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="showSettings = true">⚙ {{ t("settings") }}</button>
     </header>
 
     <div class="flex min-h-0 flex-1">
@@ -130,11 +151,14 @@ async function doImport() {
         <div class="p-2">
           <input
             v-model="query"
-            placeholder="搜索 title 或 tags..."
+            :placeholder="t('searchPlaceholder')"
             class="w-full rounded-md border border-neutral-300 bg-transparent px-2 py-1.5 text-sm outline-none focus:border-blue-400 dark:border-neutral-600"
           />
         </div>
         <div class="flex-1 overflow-y-auto px-2 pb-2">
+          <div v-if="folders.length === 0" class="p-4 text-center text-sm text-neutral-400">
+            {{ t("noSearchResults") }}
+          </div>
           <div v-for="f in folders" :key="f.name" class="mb-2">
             <div class="px-1 py-1 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
               {{ f.name }}
@@ -161,24 +185,24 @@ async function doImport() {
         <div class="flex items-center gap-2">
           <input
             v-model="editing.title"
-            placeholder="Prompt title"
+            :placeholder="t('promptTitlePlaceholder')"
             class="flex-1 rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm font-medium outline-none focus:border-blue-400 dark:border-neutral-600"
           />
           <button
             class="rounded-md border px-3 py-2 text-sm"
             :class="editing.favorite ? 'border-yellow-400 bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30' : 'border-neutral-300 dark:border-neutral-600'"
             @click="toggleFavorite"
-          >⭐ {{ editing.favorite ? "已收藏" : "收藏" }}</button>
+          >⭐ {{ editing.favorite ? t("favorited") : t("favorite") }}</button>
         </div>
         <div class="flex gap-2">
           <input
             v-model="tagsInput"
-            placeholder="Tags (逗号分隔)"
+            :placeholder="t('tagsPlaceholder')"
             class="flex-1 rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-400 dark:border-neutral-600"
           />
           <input
             v-model="editing.folder"
-            placeholder="Folder（可新建）"
+            :placeholder="t('folderPlaceholder')"
             list="folder-list"
             class="w-56 rounded-md border border-neutral-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-blue-400 dark:border-neutral-600"
           />
@@ -188,25 +212,25 @@ async function doImport() {
         </div>
         <textarea
           v-model="editing.body"
-          placeholder="Prompt body，支持 {{variable}} / {{count=15}} / {{tone=[a|b|c]}} 变量语法"
+          :placeholder="t('bodyPlaceholder')"
           class="min-h-[280px] flex-1 resize-none rounded-md border border-neutral-300 bg-transparent p-3 font-mono text-sm leading-relaxed outline-none focus:border-blue-400 dark:border-neutral-600"
         />
         <div v-if="editorShowVarHint.length" class="text-xs text-neutral-400">
-          检测到变量：
+          {{ t("variablesDetected") }}
           <span
             v-for="v in editorShowVarHint"
             :key="v.name"
             class="mr-1.5 inline-block rounded bg-neutral-200 px-1.5 py-0.5 font-mono dark:bg-neutral-700"
-          >{{ v.name }}<template v-if="v.type === 'select'">（可选值）</template><template v-else-if="v.default">（默认 {{ v.default }}）</template></span>
+          >{{ v.name }}<template v-if="v.type === 'select'"> ({{ t("selectValueHint") }})</template><template v-else-if="v.default"> ({{ t("defaultValueHint", { value: v.default }) }})</template></span>
         </div>
         <div class="flex items-center justify-between">
           <button
             v-if="isSelectedDirty"
             class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/30"
             @click="remove"
-          >删除</button>
+          >{{ t("delete") }}</button>
           <span v-else />
-          <button class="rounded-md bg-blue-500 px-5 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="save">Save</button>
+          <button class="rounded-md bg-blue-500 px-5 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="save">{{ t("save") }}</button>
         </div>
       </main>
     </div>

@@ -15,6 +15,7 @@ export interface Settings {
   hotkey: string;
   autostart: boolean;
   theme: "auto" | "light" | "dark";
+  language: "auto" | "zh" | "en";
 }
 
 export interface ParsedVar {
@@ -24,7 +25,9 @@ export interface ParsedVar {
   options: string[];
 }
 
-const invoke = (window as any).__TAURI__.core.invoke;
+function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return (window as any).__TAURI__.core.invoke(command, args);
+}
 
 export const api = {
   listPrompts: (): Promise<Prompt[]> => invoke("list_prompts"),
@@ -90,6 +93,7 @@ export function filterPrompts(prompts: Prompt[], query: string): Prompt[] {
   return prompts.filter(
     (p) =>
       p.title.toLowerCase().includes(q) ||
-      p.tags.some((t) => t.toLowerCase().includes(q))
+      p.tags.some((t) => t.toLowerCase().includes(q)) ||
+      p.folder.toLowerCase().includes(q)
   );
 }
