@@ -20,7 +20,7 @@ Thumbs.db
 *.suo
 *.user
 *.sln.docstates
-
+.workbuddy/
 # 本地文档
 docs/
 
@@ -45,3 +45,6 @@ docs/
 *.bak
 *.dmp
 *.pdb
+
+# agents工作日志
+worklogs/

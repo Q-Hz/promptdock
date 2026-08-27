@@ -34,7 +34,7 @@ PromptDock can import JSON files exported by PromptDeck (`format: "promptdeck"`)
 ## Key features
 
 - **Global launcher** — Press `Ctrl + Shift + Space` by default to open PromptDock from any application.
-- **Prompt variables** — Use text variables, defaults, and selectable values such as `{{topic}}`, `{{count=15}}`, and `{{tone=[formal|friendly]}}`.
+- **Prompt variables** — Use text variables, defaults, selectable values, and multi-select values such as `{{topic}}`, `{{count=15}}`, `{{tone=[formal|friendly]}}`, and `{{tags+=[React|Vue|Svelte]}}`. Multi-select variables render as checkboxes in the launcher, with selected values joined by `, `; use `~` to pick a custom separator (supports `\n` and `\t` escapes), e.g. `{{lines+=[a|b|c]~\n}}` puts each value on its own line.
 - **Prompt management** — Create, edit, delete, group, tag, and favorite prompts in the manager window.
 - **Fast search** — Search prompt titles, tags, and folders; navigate results with the keyboard.
 - **Local storage** — No account, cloud service, or remote database is required.

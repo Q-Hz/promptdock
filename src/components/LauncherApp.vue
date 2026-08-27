@@ -13,7 +13,7 @@ const query = ref("");
 const prompts = ref<Prompt[]>([]);
 const selectedId = ref<string | null>(null);
 const selIndex = ref(0);
-const varValues = ref<Record<string, string>>({});
+const varValues = ref<Record<string, string | string[]>>({});
 const resultText = ref("");
 const copied = ref(false);
 const copying = ref(false);
@@ -79,14 +79,25 @@ function reset() {
 
 function choose(p: Prompt) {
   selectedId.value = p.id;
-  const values: Record<string, string> = {};
-  for (const v of parseVariables(p.body)) values[v.name] = v.default;
+  const values: Record<string, string | string[]> = {};
+  for (const v of parseVariables(p.body)) values[v.name] = v.type === "multi" ? [] : v.default;
   varValues.value = values;
   stage.value = "variables";
   errorMessage.value = "";
   void nextTick(() => {
     document.querySelector<HTMLElement>(".variable-input")?.focus();
   });
+}
+
+function multiHas(name: string, option: string): boolean {
+  const value = varValues.value[name];
+  return Array.isArray(value) && value.includes(option);
+}
+
+function toggleMulti(event: Event, name: string, option: string) {
+  const checked = (event.target as HTMLInputElement).checked;
+  const current = Array.isArray(varValues.value[name]) ? (varValues.value[name] as string[]) : [];
+  varValues.value[name] = checked ? [...current, option] : current.filter((o) => o !== option);
 }
 
 function generate() {
@@ -215,6 +226,24 @@ function onKeydown(e: KeyboardEvent) {
         >
           <option v-for="o in v.options" :key="o" :value="o">{{ o }}</option>
         </select>
+        <div v-else-if="v.type === 'multi'" class="variable-input flex flex-wrap gap-1.5">
+          <label
+            v-for="o in v.options"
+            :key="o"
+            class="flex cursor-pointer select-none items-center gap-1.5 rounded-md border px-2 py-1 text-sm transition-colors"
+            :class="multiHas(v.name, o)
+              ? 'border-blue-400 bg-blue-50 text-blue-700 dark:border-blue-500 dark:bg-blue-900/30 dark:text-blue-300'
+              : 'border-neutral-300 bg-white text-neutral-600 hover:border-neutral-400 dark:border-neutral-600 dark:bg-neutral-700 dark:text-neutral-300 dark:hover:border-neutral-500'"
+          >
+            <input
+              type="checkbox"
+              class="accent-blue-500"
+              :checked="multiHas(v.name, o)"
+              @change="toggleMulti($event, v.name, o)"
+            />
+            <span>{{ o }}</span>
+          </label>
+        </div>
         <textarea
           v-else
           v-model="varValues[v.name]"

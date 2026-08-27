@@ -20,9 +20,10 @@ export interface Settings {
 
 export interface ParsedVar {
   name: string;
-  type: "text" | "select";
+  type: "text" | "select" | "multi";
   default: string;
   options: string[];
+  separator: string;
 }
 
 function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
@@ -44,6 +45,25 @@ export const api = {
     invoke("import_prompts", { path, replace }),
 };
 
+const DEFAULT_MULTI_SEPARATOR = ", ";
+
+function unescapeSeparator(raw: string): string {
+  return raw.replaceAll("\\n", "\n").replaceAll("\\t", "\t");
+}
+
+// 从 {{name+=[a|b|c]~sep}} 的值部分解析选项与连接符；非多选语法返回 null
+function parseMultiValue(value: string): { options: string[]; separator: string } | null {
+  if (!value.startsWith("[")) return null;
+  const close = value.indexOf("]");
+  if (close === -1) return null;
+  const rest = value.slice(close + 1);
+  if (rest && !rest.startsWith("~")) return null;
+  return {
+    options: value.slice(1, close).split("|").filter((o) => o.length > 0),
+    separator: rest ? unescapeSeparator(rest.slice(1)) : DEFAULT_MULTI_SEPARATOR,
+  };
+}
+
 export function parseVariables(body: string): ParsedVar[] {
   const re = /\{\{\s*([^{}]+?)\s*\}\}/g;
   const seen = new Set<string>();
@@ -53,7 +73,16 @@ export function parseVariables(body: string): ParsedVar[] {
     const raw = m[1];
     if (seen.has(raw)) continue;
     seen.add(raw);
-    if (raw.includes("=")) {
+    if (raw.includes("+=")) {
+      const [name, value] = raw.split("+=", 2);
+      const multi = parseMultiValue(value.trim());
+      if (multi) {
+        result.push({ name, type: "multi", default: "", options: multi.options, separator: multi.separator });
+        continue;
+      }
+      // += 但不是选项列表时按带默认值的文本变量处理
+      result.push({ name, type: "text", default: value, options: [], separator: "" });
+    } else if (raw.includes("=")) {
       const [name, value] = raw.split("=", 2);
       if (value.startsWith("[") && value.endsWith("]")) {
         result.push({
@@ -61,22 +90,36 @@ export function parseVariables(body: string): ParsedVar[] {
           type: "select",
           default: value.slice(1, -1).split("|")[0],
           options: value.slice(1, -1).split("|"),
+          separator: "",
         });
       } else {
-        result.push({ name, type: "text", default: value, options: [] });
+        result.push({ name, type: "text", default: value, options: [], separator: "" });
       }
     } else {
-      result.push({ name: raw, type: "text", default: "", options: [] });
+      result.push({ name: raw, type: "text", default: "", options: [], separator: "" });
     }
   }
   return result;
 }
 
-export function renderBody(body: string, values: Record<string, string>): string {
+// renderBody 需要从占位符本身取回多选连接符，因此与 parseVariables 共用同一套提取规则
+function placeholderInfo(raw: string): { name: string; separator: string } {
+  if (raw.includes("+=")) {
+    const [name, value] = raw.split("+=", 2);
+    const multi = parseMultiValue(value.trim());
+    if (multi) return { name, separator: multi.separator };
+    return { name, separator: "" };
+  }
+  return { name: raw.includes("=") ? raw.split("=", 2)[0] : raw, separator: DEFAULT_MULTI_SEPARATOR };
+}
+
+export function renderBody(body: string, values: Record<string, string | string[]>): string {
   const re = /\{\{\s*([^{}]+?)\s*\}\}/g;
   return body.replace(re, (_full, raw: string) => {
-    const name = raw.includes("=") ? raw.split("=", 2)[0] : raw;
-    return values[name] ?? "";
+    const { name, separator } = placeholderInfo(raw);
+    const value = values[name];
+    if (Array.isArray(value)) return value.join(separator);
+    return value ?? "";
   });
 }
 

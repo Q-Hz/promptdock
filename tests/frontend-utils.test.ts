@@ -52,6 +52,46 @@ test("variable parsing and rendering preserve the launcher generation flow", () 
   );
 });
 
+test("multi-select variables parse options and separator", () => {
+  const [multi, withSep] = parseVariables(
+    "Stack: {{tags+=[react|vue|svelte]}}.\nLines: {{levels+=[low|mid|high]~\\n}}."
+  );
+  assert.deepEqual(
+    { name: multi.name, type: multi.type, options: multi.options, separator: multi.separator },
+    { name: "tags", type: "multi", options: ["react", "vue", "svelte"], separator: ", " }
+  );
+  assert.deepEqual(
+    { name: withSep.name, type: withSep.type, options: withSep.options, separator: withSep.separator },
+    { name: "levels", type: "multi", options: ["low", "mid", "high"], separator: "\n" }
+  );
+});
+
+test("multi-select values join with the placeholder separator when rendered", () => {
+  const body = "Stack: {{tags+=[react|vue|svelte]}}. Levels: {{levels+=[low|mid|high]~\\n}}.";
+  assert.equal(
+    renderBody(body, { tags: ["react", "svelte"], levels: ["mid", "high"] }),
+    "Stack: react, svelte. Levels: mid\nhigh."
+  );
+  assert.equal(renderBody(body, { tags: [], levels: [] }), "Stack: . Levels: .");
+  // 字符串值仍然直接替换，旧提示词行为不变
+  assert.equal(renderBody(body, { tags: "react", levels: "low" }), "Stack: react. Levels: low.");
+});
+
+test("multi-select placeholder repeated in the body yields one variable and consistent rendering", () => {
+  const body = "{{tags+=[a|b]}} and {{tags+=[a|b]}}";
+  const variables = parseVariables(body);
+  assert.equal(variables.length, 1);
+  assert.equal(renderBody(body, { tags: ["a", "b"] }), "a, b and a, b");
+});
+
+test("+= without an option list falls back to a text variable with default", () => {
+  const [fallback] = parseVariables("{{count+=5}}");
+  assert.deepEqual(
+    { name: fallback.name, type: fallback.type, default: fallback.default },
+    { name: "count", type: "text", default: "5" }
+  );
+});
+
 test("the centralized language resources switch between Chinese and English", () => {
   setLanguage("zh");
   assert.equal(t("generatePrompt"), "生成提示词");

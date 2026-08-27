@@ -3,7 +3,7 @@
 use std::fs;
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -558,7 +558,32 @@ fn import_prompts(
             .map_err(|e| e.to_string())?;
     }
     for p in &prompts {
-        insert_prompt(&tx, p).map_err(|e| e.to_string())?;
+        // 同名但 id 不同的旧条目：保留其 id 与使用记录，内容更新为文件版本
+        let conflicting_id: Option<String> = tx
+            .query_row(
+                "SELECT id FROM prompts WHERE title = ?1 AND id <> ?2",
+                params![p.title, p.id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if let Some(old_id) = conflicting_id {
+            tx.execute(
+                "UPDATE prompts SET body = ?2, tags = ?3, folder = ?4, favorite = ?5, updated_at = ?6
+                 WHERE id = ?1",
+                params![
+                    old_id,
+                    p.body,
+                    serde_json::to_string(&p.tags).unwrap_or_default(),
+                    p.folder,
+                    p.favorite as i32,
+                    chrono_now(),
+                ],
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            insert_prompt(&tx, p).map_err(|e| e.to_string())?;
+        }
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(prompts.len())

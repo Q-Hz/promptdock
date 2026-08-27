@@ -115,15 +115,28 @@ async function doImport() {
     multiple: false,
   });
   if (!path) return;
-  const replace = await ask(t("importConfirmMessage"), {
+  let replace = await ask(t("importConfirmMessage"), {
     title: t("importConfirmTitle"),
     kind: "info",
     okLabel: t("replace"),
     cancelLabel: t("merge"),
   });
+  if (replace) {
+    const confirmed = await ask(t("importReplaceConfirmMessage"), {
+      title: t("importConfirmTitle"),
+      kind: "warning",
+      okLabel: t("replace"),
+      cancelLabel: t("cancel"),
+    });
+    if (!confirmed) return;
+  }
   try {
     const count = await api.importPrompts(path as string, replace);
     await reload();
+    // 编辑器里可能还开着导入前的旧副本，重新同步或清空
+    const current = prompts.value.find((p) => p.id === selectedId.value);
+    if (current) select(current);
+    else newPrompt();
     alert(t("importSuccess", { count }));
   } catch (error) {
     alert(t("operationFailed", { error: translateApiError(error) }));
@@ -221,7 +234,7 @@ async function doImport() {
             v-for="v in editorShowVarHint"
             :key="v.name"
             class="mr-1.5 inline-block rounded bg-neutral-200 px-1.5 py-0.5 font-mono dark:bg-neutral-700"
-          >{{ v.name }}<template v-if="v.type === 'select'"> ({{ t("selectValueHint") }})</template><template v-else-if="v.default"> ({{ t("defaultValueHint", { value: v.default }) }})</template></span>
+          >{{ v.name }}<template v-if="v.type === 'multi'"> ({{ t("multiValueHint") }})</template><template v-else-if="v.type === 'select'"> ({{ t("selectValueHint") }})</template><template v-else-if="v.default"> ({{ t("defaultValueHint", { value: v.default }) }})</template></span>
         </div>
         <div class="flex items-center justify-between">
           <button
