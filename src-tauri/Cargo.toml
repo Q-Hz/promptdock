@@ -1,6 +1,6 @@
 [package]
 name = "promptdock"
-version = "1.1.0"
+version = "1.2.0"
 description = "PromptDock - Windows 轻量化 Prompt 管理与调用工具"
 edition = "2021"
 
