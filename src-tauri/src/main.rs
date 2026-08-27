@@ -36,6 +36,9 @@ pub struct Settings {
     pub autostart: bool,
     pub theme: String,
     pub language: String,
+    pub advance_key: String,
+    pub newline_key: String,
+    pub back_key: String,
 }
 
 fn init_db(app: &AppHandle) -> Connection {
@@ -234,13 +237,43 @@ fn default_settings() -> Settings {
         autostart: false,
         theme: "auto".into(),
         language: "auto".into(),
+        advance_key: "enter".into(),
+        newline_key: "shift+enter".into(),
+        back_key: "escape".into(),
     }
+}
+
+// 键位格式：可选的 ctrl/alt/shift/meta 修饰键 + 一个非修饰键，如 "shift+enter"
+fn is_valid_key_binding(value: &str) -> bool {
+    let mut key = String::new();
+    for part in value.split('+') {
+        let part = part.trim();
+        if part.is_empty() {
+            return false;
+        }
+        let lower = part.to_ascii_lowercase();
+        if !matches!(lower.as_str(), "ctrl" | "alt" | "shift" | "meta") {
+            if !key.is_empty() {
+                return false;
+            }
+            key = lower;
+        }
+    }
+    !key.is_empty()
 }
 
 fn read_settings(conn: &Connection) -> Settings {
     let get = |k: &str| -> String {
         conn.query_row("SELECT v FROM settings WHERE k=?1", [k], |r| r.get(0))
             .unwrap_or_default()
+    };
+    let get_or = |k: &str, default: &str| -> String {
+        let value = get(k);
+        if is_valid_key_binding(&value) {
+            value
+        } else {
+            default.into()
+        }
     };
     Settings {
         hotkey: {
@@ -268,6 +301,9 @@ fn read_settings(conn: &Connection) -> Settings {
                 "auto".into()
             }
         },
+        advance_key: get_or("advance_key", "enter"),
+        newline_key: get_or("newline_key", "shift+enter"),
+        back_key: get_or("back_key", "escape"),
     }
 }
 
@@ -282,6 +318,15 @@ fn set_settings(
     }
     if !matches!(settings.language.as_str(), "auto" | "zh" | "en") {
         return Err("settings.invalid_language".into());
+    }
+    for value in [
+        &settings.advance_key,
+        &settings.newline_key,
+        &settings.back_key,
+    ] {
+        if !is_valid_key_binding(value) {
+            return Err("settings.invalid_key_binding".into());
+        }
     }
 
     let previous = {
@@ -302,6 +347,9 @@ fn set_settings(
             ),
             ("theme", settings.theme.clone()),
             ("language", settings.language.clone()),
+            ("advance_key", settings.advance_key.clone()),
+            ("newline_key", settings.newline_key.clone()),
+            ("back_key", settings.back_key.clone()),
         ] {
             tx.execute(
                 "INSERT OR REPLACE INTO settings (k,v) VALUES (?1,?2)",
@@ -735,5 +783,20 @@ mod tests {
         assert_eq!(settings.theme, "auto");
         assert_eq!(settings.language, "auto");
         assert!(!settings.autostart);
+        assert_eq!(settings.advance_key, "enter");
+        assert_eq!(settings.newline_key, "shift+enter");
+        assert_eq!(settings.back_key, "escape");
+    }
+
+    #[test]
+    fn key_binding_validation_accepts_modifier_combinations_and_rejects_partial_input() {
+        assert!(is_valid_key_binding("enter"));
+        assert!(is_valid_key_binding("shift+enter"));
+        assert!(is_valid_key_binding("Ctrl+Alt+Space"));
+        assert!(is_valid_key_binding("escape"));
+        assert!(!is_valid_key_binding(""));
+        assert!(!is_valid_key_binding("+"));
+        assert!(!is_valid_key_binding("ctrl+shift"));
+        assert!(!is_valid_key_binding("ctrl+enter+x"));
     }
 }

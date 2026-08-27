@@ -16,6 +16,9 @@ export interface Settings {
   autostart: boolean;
   theme: "auto" | "light" | "dark";
   language: "auto" | "zh" | "en";
+  advanceKey: string;
+  newlineKey: string;
+  backKey: string;
 }
 
 export interface ParsedVar {

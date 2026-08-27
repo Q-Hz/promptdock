@@ -1,22 +1,34 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 import { api, type Settings } from "../lib/api";
-import { t, translateApiError } from "../lib/i18n";
+import { t, translateApiError, type MessageKey } from "../lib/i18n";
 import { applyClientSettings } from "../lib/preferences";
+import { DEFAULT_KEY_BINDINGS } from "../lib/keybindings";
 
 const emit = defineEmits<{ (e: "close"): void }>();
+
+type RecordTarget = "hotkey" | "advanceKey" | "newlineKey" | "backKey";
 
 const settings = ref<Settings>({
   hotkey: "ctrl+shift+space",
   autostart: false,
   theme: "auto",
   language: "auto",
+  advanceKey: DEFAULT_KEY_BINDINGS.advance,
+  newlineKey: DEFAULT_KEY_BINDINGS.newline,
+  backKey: DEFAULT_KEY_BINDINGS.back,
 });
 const originalSettings = ref<Settings>({ ...settings.value });
 const hotkeyDraft = ref("");
-const recording = ref(false);
+const recordTarget = ref<RecordTarget | null>(null);
 const savedTip = ref(false);
 const loaded = ref(false);
+
+const bindingRows: { field: RecordTarget; label: MessageKey }[] = [
+  { field: "advanceKey", label: "keyAdvance" },
+  { field: "newlineKey", label: "keyNewline" },
+  { field: "backKey", label: "keyBack" },
+];
 
 onMounted(async () => {
   settings.value = await api.getSettings();
@@ -32,13 +44,16 @@ watch(
   }
 );
 
-function startRecord() {
-  recording.value = true;
-  hotkeyDraft.value = "";
+function startRecord(target: RecordTarget) {
+  recordTarget.value = target;
+  if (target === "hotkey") hotkeyDraft.value = "";
+  void nextTick(() => {
+    document.getElementById(`binding-input-${target}`)?.focus();
+  });
 }
 
 function onHotkeyKeydown(e: KeyboardEvent) {
-  if (!recording.value) return;
+  if (!recordTarget.value) return;
   e.preventDefault();
   const parts: string[] = [];
   if (e.ctrlKey) parts.push("ctrl");
@@ -47,8 +62,11 @@ function onHotkeyKeydown(e: KeyboardEvent) {
   const key = e.key.toLowerCase();
   if (["control", "alt", "shift"].includes(key)) return;
   parts.push(key === " " ? "space" : key);
-  hotkeyDraft.value = parts.join("+");
-  recording.value = false;
+  const value = parts.join("+");
+  const target = recordTarget.value;
+  if (target === "hotkey") hotkeyDraft.value = value;
+  else settings.value[target] = value;
+  recordTarget.value = null;
 }
 
 async function save() {
@@ -81,10 +99,33 @@ function cancel() {
       <div class="mb-4">
         <div class="mb-1 text-xs font-medium text-neutral-500">{{ t("hotkey") }}</div>
         <div class="flex gap-2">
-          <code class="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600" @keydown="onHotkeyKeydown" tabindex="0">
-            {{ recording ? t("pressHotkey") : hotkeyDraft }}
+          <code
+            id="binding-input-hotkey"
+            class="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-blue-400 dark:border-neutral-600"
+            tabindex="0"
+            @keydown="onHotkeyKeydown"
+            @click="startRecord('hotkey')"
+          >
+            {{ recordTarget === "hotkey" ? t("pressHotkey") : hotkeyDraft }}
           </code>
-          <button class="rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600" @click="startRecord">{{ t("change") }}</button>
+          <button class="rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600" @click="startRecord('hotkey')">{{ t("change") }}</button>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <div class="mb-1 text-xs font-medium text-neutral-500">{{ t("launcherKeysSection") }}</div>
+        <div v-for="row in bindingRows" :key="row.field" class="mb-2 flex items-center gap-2">
+          <span class="w-24 shrink-0 text-xs text-neutral-500">{{ t(row.label) }}</span>
+          <code
+            :id="`binding-input-${row.field}`"
+            class="flex-1 rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none focus:border-blue-400 dark:border-neutral-600"
+            tabindex="0"
+            @keydown="onHotkeyKeydown"
+            @click="startRecord(row.field)"
+          >
+            {{ recordTarget === row.field ? t("pressHotkey") : settings[row.field] }}
+          </code>
+          <button class="rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600" @click="startRecord(row.field)">{{ t("change") }}</button>
         </div>
       </div>
 
