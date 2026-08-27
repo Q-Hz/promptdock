@@ -46,5 +46,7 @@ docs/
 *.dmp
 *.pdb
 
-# agents工作日志
+# agents
 worklogs/
+AGENTS.md
+CLAUDE.md
