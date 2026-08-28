@@ -1,12 +1,13 @@
 {
   "name": "promptdock",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.3.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test tests/frontend-utils.test.ts tests/keybindings.test.ts",
+    "test": "node --experimental-strip-types --test tests/frontend-utils.test.ts tests/keybindings.test.ts tests/generate-latest-json.test.ts",
+    "latest-json": "node scripts/generate-latest-json.ts",
     "tauri": "tauri"
   },
   "dependencies": {
