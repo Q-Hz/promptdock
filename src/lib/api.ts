@@ -19,6 +19,12 @@ export interface Settings {
   advanceKey: string;
   newlineKey: string;
   backKey: string;
+  autoCheckUpdate: boolean;
+}
+
+export interface UpdateInfo {
+  version: string;
+  body: string | null;
 }
 
 export interface ParsedVar {
@@ -46,6 +52,8 @@ export const api = {
   exportPrompts: (path: string): Promise<void> => invoke("export_prompts", { path }),
   importPrompts: (path: string, replace: boolean): Promise<number> =>
     invoke("import_prompts", { path, replace }),
+  checkForUpdates: (): Promise<UpdateInfo | null> => invoke("check_for_updates"),
+  installUpdate: (): Promise<void> => invoke("install_update"),
 };
 
 const DEFAULT_MULTI_SEPARATOR = ", ";

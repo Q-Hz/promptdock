@@ -39,6 +39,7 @@ pub struct Settings {
     pub advance_key: String,
     pub newline_key: String,
     pub back_key: String,
+    pub auto_check_update: bool,
 }
 
 fn init_db(app: &AppHandle) -> Connection {
@@ -240,6 +241,7 @@ fn default_settings() -> Settings {
         advance_key: "enter".into(),
         newline_key: "shift+enter".into(),
         back_key: "escape".into(),
+        auto_check_update: false,
     }
 }
 
@@ -304,6 +306,7 @@ fn read_settings(conn: &Connection) -> Settings {
         advance_key: get_or("advance_key", "enter"),
         newline_key: get_or("newline_key", "shift+enter"),
         back_key: get_or("back_key", "escape"),
+        auto_check_update: get("auto_check_update") == "1",
     }
 }
 
@@ -350,6 +353,10 @@ fn set_settings(
             ("advance_key", settings.advance_key.clone()),
             ("newline_key", settings.newline_key.clone()),
             ("back_key", settings.back_key.clone()),
+            (
+                "auto_check_update",
+                if settings.auto_check_update { "1" } else { "0" }.into(),
+            ),
         ] {
             tx.execute(
                 "INSERT OR REPLACE INTO settings (k,v) VALUES (?1,?2)",
@@ -637,6 +644,97 @@ fn import_prompts(
     Ok(prompts.len())
 }
 
+pub struct PendingUpdate(pub Mutex<Option<tauri_plugin_updater::Update>>);
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub version: String,
+    pub body: Option<String>,
+}
+
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let update = updater.check().await.map_err(|e| e.to_string())?;
+    let pending_state = app.state::<PendingUpdate>();
+    let mut pending = pending_state.0.lock().map_err(|e| e.to_string())?;
+    match update {
+        Some(update) => {
+            let info = UpdateInfo {
+                version: update.version.clone(),
+                body: update.body.clone(),
+            };
+            *pending = Some(update);
+            Ok(Some(info))
+        }
+        None => {
+            *pending = None;
+            Ok(None)
+        }
+    }
+}
+
+async fn install_pending_update(app: &AppHandle) -> Result<(), String> {
+    let update = {
+        let pending_state = app.state::<PendingUpdate>();
+        let mut pending = pending_state.0.lock().map_err(|e| e.to_string())?;
+        pending
+            .take()
+            .ok_or_else(|| "update.not_pending".to_string())?
+    };
+    let emitter = app.clone();
+    update
+        .download_and_install(
+            move |chunk_length, content_length| {
+                let _ = emitter.emit(
+                    "update-download-progress",
+                    serde_json::json!({ "chunkLength": chunk_length, "contentLength": content_length }),
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    install_pending_update(&app).await
+}
+
+// 自动检查发现新版本时弹出原生对话框确认，托盘常驻场景下不依赖任何窗口
+fn prompt_install_update(app: &AppHandle, version: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    let settings = get_settings_inner(app);
+    let (title, message) = if use_chinese(&settings.language) {
+        (
+            "PromptDock 更新".to_string(),
+            format!("发现新版本 {version}，是否立即安装？\n安装完成后应用将自动重启。"),
+        )
+    } else {
+        (
+            "PromptDock Update".to_string(),
+            format!("Version {version} is available. Install it now?\nThe app will restart automatically when done."),
+        )
+    };
+    let app_handle = app.clone();
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::YesNo)
+        .show(move |confirmed| {
+            if confirmed {
+                tauri::async_runtime::spawn(async move {
+                    let _ = install_pending_update(&app_handle).await;
+                });
+            }
+        });
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -653,6 +751,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             list_prompts,
             save_prompt,
@@ -664,12 +763,15 @@ pub fn run() {
             hide_main,
             open_manager,
             export_prompts,
-            import_prompts
+            import_prompts,
+            check_for_updates,
+            install_update
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
             let conn = init_db(&app_handle);
             app.manage(DbState(Mutex::new(conn)));
+            app.manage(PendingUpdate(Mutex::new(None)));
 
             let settings = get_settings_inner(&app_handle);
             let menu = build_tray_menu(&app_handle, &settings)?;
@@ -689,6 +791,27 @@ pub fn run() {
             register_hotkey(&app_handle, &settings.hotkey)?;
             apply_autostart(&app_handle, settings.autostart);
             apply_window_preferences(&app_handle, &settings);
+
+            if settings.auto_check_update {
+                let handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri_plugin_updater::UpdaterExt;
+                    let Ok(updater) = handle.updater() else {
+                        return;
+                    };
+                    let Ok(Some(update)) = updater.check().await else {
+                        return;
+                    };
+                    let info = UpdateInfo {
+                        version: update.version.clone(),
+                        body: update.body.clone(),
+                    };
+                    if let Ok(mut pending) = handle.state::<PendingUpdate>().0.lock() {
+                        *pending = Some(update);
+                    }
+                    prompt_install_update(&handle, &info.version);
+                });
+            }
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -786,6 +909,7 @@ mod tests {
         assert_eq!(settings.advance_key, "enter");
         assert_eq!(settings.newline_key, "shift+enter");
         assert_eq!(settings.back_key, "escape");
+        assert!(!settings.auto_check_update);
     }
 
     #[test]

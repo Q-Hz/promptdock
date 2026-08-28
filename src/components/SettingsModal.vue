@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { api, type Settings } from "../lib/api";
 import { t, translateApiError, type MessageKey } from "../lib/i18n";
 import { applyClientSettings } from "../lib/preferences";
@@ -17,6 +17,7 @@ const settings = ref<Settings>({
   advanceKey: DEFAULT_KEY_BINDINGS.advance,
   newlineKey: DEFAULT_KEY_BINDINGS.newline,
   backKey: DEFAULT_KEY_BINDINGS.back,
+  autoCheckUpdate: false,
 });
 const originalSettings = ref<Settings>({ ...settings.value });
 const hotkeyDraft = ref("");
@@ -30,11 +31,86 @@ const bindingRows: { field: RecordTarget; label: MessageKey }[] = [
   { field: "backKey", label: "keyBack" },
 ];
 
+type UpdatePhase = "idle" | "checking" | "latest" | "available" | "downloading" | "installing" | "error";
+const updatePhase = ref<UpdatePhase>("idle");
+const updateVersion = ref("");
+const updateError = ref("");
+const downloadedBytes = ref(0);
+const totalBytes = ref<number | null>(null);
+const appVersion = ref("");
+let unlistenProgress: (() => void) | undefined;
+
+const downloadPercent = computed(() =>
+  totalBytes.value ? Math.min(100, Math.round((downloadedBytes.value / totalBytes.value) * 100)) : null
+);
+
+const updateBusy = computed(() => ["checking", "downloading", "installing"].includes(updatePhase.value));
+
+const updateStatusText = computed(() => {
+  switch (updatePhase.value) {
+    case "latest":
+      return t("updateUpToDate");
+    case "downloading":
+      return downloadPercent.value != null
+        ? `${t("downloadingUpdate")} ${downloadPercent.value}%`
+        : t("downloadingUpdate");
+    case "installing":
+      return t("installingUpdate");
+    case "error":
+      return updateError.value;
+    default:
+      return "";
+  }
+});
+
+async function checkUpdates() {
+  if (updateBusy.value) return;
+  updatePhase.value = "checking";
+  updateError.value = "";
+  try {
+    const info = await api.checkForUpdates();
+    if (info) {
+      updateVersion.value = info.version;
+      updatePhase.value = "available";
+    } else {
+      updatePhase.value = "latest";
+    }
+  } catch (err) {
+    updateError.value = t("updateCheckFailed", { error: translateApiError(err) });
+    updatePhase.value = "error";
+  }
+}
+
+async function installUpdateNow() {
+  downloadedBytes.value = 0;
+  totalBytes.value = null;
+  updatePhase.value = "downloading";
+  try {
+    await api.installUpdate();
+    updatePhase.value = "installing";
+  } catch (err) {
+    updateError.value = t("updateInstallFailed", { error: translateApiError(err) });
+    updatePhase.value = "error";
+  }
+}
+
 onMounted(async () => {
   settings.value = await api.getSettings();
   originalSettings.value = { ...settings.value };
   hotkeyDraft.value = settings.value.hotkey;
   loaded.value = true;
+  appVersion.value = await (window as any).__TAURI__.app.getVersion().catch(() => "");
+  unlistenProgress = await (window as any).__TAURI__.event.listen(
+    "update-download-progress",
+    (event: { payload: { chunkLength: number; contentLength: number | null } }) => {
+      downloadedBytes.value += event.payload.chunkLength;
+      if (event.payload.contentLength != null) totalBytes.value = event.payload.contentLength;
+    }
+  );
+});
+
+onUnmounted(() => {
+  unlistenProgress?.();
 });
 
 watch(
@@ -133,6 +209,30 @@ function cancel() {
         <input v-model="settings.autostart" type="checkbox" class="h-4 w-4" />
         {{ t("autostart") }}
       </label>
+
+      <div class="mb-4">
+        <div class="mb-1 text-xs font-medium text-neutral-500">{{ t("updates") }}</div>
+        <label class="mb-2 flex items-center gap-2 text-sm">
+          <input v-model="settings.autoCheckUpdate" type="checkbox" class="h-4 w-4" />
+          {{ t("autoCheckUpdate") }}
+        </label>
+        <div class="flex items-center gap-2">
+          <button
+            class="rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600"
+            :disabled="updateBusy"
+            @click="checkUpdates"
+          >{{ updatePhase === "checking" ? t("checkingUpdate") : t("checkUpdate") }}</button>
+          <span class="text-xs text-neutral-500">{{ updateStatusText }}</span>
+        </div>
+        <div v-if="updatePhase === 'available'" class="mt-2 flex items-center gap-2 text-sm">
+          <span>{{ t("updateAvailable", { version: updateVersion }) }}</span>
+          <button
+            class="rounded-md bg-blue-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600"
+            @click="installUpdateNow"
+          >{{ t("installUpdate") }}</button>
+        </div>
+        <div class="mt-2 text-xs text-neutral-400">{{ t("currentVersion", { version: appVersion }) }}</div>
+      </div>
 
       <div class="mb-4">
         <div class="mb-1 text-xs font-medium text-neutral-500">{{ t("theme") }}</div>
