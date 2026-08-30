@@ -1,7 +1,7 @@
 [package]
 name = "promptdock"
-version = "1.3.1"
-description = "PromptDock - Windows 轻量化 Prompt 管理与调用工具"
+version = "1.4.0"
+description = "PromptDock - 跨平台轻量化 Prompt 管理与调用工具"
 edition = "2021"
 
 [build-dependencies]

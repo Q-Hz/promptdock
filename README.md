@@ -136,7 +136,7 @@ macOS:   ~/Library/Application Support/com.promptdock.app/prompts.db
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 20 LTS or newer
+- [Node.js](https://nodejs.org/) 22 LTS (22.6 or newer)
 - [Rust](https://rustup.rs/) stable toolchain
 - Windows: Microsoft C++ Build Tools with the **Desktop development with C++** workload, plus Microsoft Edge WebView2 Runtime
 - macOS: Xcode Command Line Tools (`xcode-select --install`)

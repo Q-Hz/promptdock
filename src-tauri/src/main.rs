@@ -14,6 +14,8 @@ use tauri::{
 
 pub struct DbState(pub Mutex<Connection>);
 
+const DEFAULT_GLOBAL_HOTKEY: &str = "cmdorctrl+shift+space";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Prompt {
@@ -234,7 +236,7 @@ fn get_settings(state: tauri::State<DbState>) -> Result<Settings, String> {
 
 fn default_settings() -> Settings {
     Settings {
-        hotkey: "ctrl+shift+space".into(),
+        hotkey: DEFAULT_GLOBAL_HOTKEY.into(),
         autostart: false,
         theme: "auto".into(),
         language: "auto".into(),
@@ -281,7 +283,7 @@ fn read_settings(conn: &Connection) -> Settings {
         hotkey: {
             let value = get("hotkey");
             if value.is_empty() {
-                "ctrl+shift+space".into()
+                DEFAULT_GLOBAL_HOTKEY.into()
             } else {
                 value
             }
@@ -339,6 +341,12 @@ fn set_settings(
 
     replace_hotkey(&app, &previous.hotkey, &settings.hotkey)?;
 
+    if let Err(error) = apply_autostart(&app, settings.autostart) {
+        let _ = replace_hotkey(&app, &settings.hotkey, &previous.hotkey);
+        let _ = apply_autostart(&app, previous.autostart);
+        return Err(format!("settings.autostart_failed:{error}"));
+    }
+
     let save_result = (|| -> Result<(), String> {
         let mut conn = state.0.lock().map_err(|e| e.to_string())?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -369,10 +377,10 @@ fn set_settings(
 
     if let Err(error) = save_result {
         let _ = replace_hotkey(&app, &settings.hotkey, &previous.hotkey);
+        let _ = apply_autostart(&app, previous.autostart);
         return Err(error);
     }
 
-    apply_autostart(&app, settings.autostart);
     apply_window_preferences(&app, &settings);
     update_tray_menu(&app, &settings)?;
     app.emit("settings-changed", settings)
@@ -430,14 +438,15 @@ fn get_settings_inner(app: &AppHandle) -> Settings {
         .unwrap_or_else(default_settings)
 }
 
-fn apply_autostart(app: &AppHandle, enable: bool) {
+fn apply_autostart(app: &AppHandle, enable: bool) -> Result<(), String> {
     use tauri_plugin_autostart::AutoLaunchManager;
     let manager = app.state::<AutoLaunchManager>();
-    let _ = if enable {
+    if enable {
         manager.enable()
     } else {
         manager.disable()
-    };
+    }
+    .map_err(|error| error.to_string())
 }
 
 fn use_chinese(language: &str) -> bool {
@@ -449,6 +458,112 @@ fn use_chinese(language: &str) -> bool {
             .unwrap_or(false),
     }
 }
+
+fn capitalize_hotkey_key(value: &str) -> String {
+    match value {
+        "escape" | "esc" => "Esc".into(),
+        "space" => "Space".into(),
+        "enter" => "Enter".into(),
+        "tab" => "Tab".into(),
+        "backspace" => "Backspace".into(),
+        "delete" => "Delete".into(),
+        _ if value.len() == 1 => value.to_ascii_uppercase(),
+        _ => {
+            let mut chars = value.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+fn format_hotkey_for_display(value: &str, is_macos: bool) -> String {
+    let mut modifiers: Vec<(&str, usize)> = Vec::new();
+    let mut key = String::new();
+
+    for part in value
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+    {
+        let lower = part.to_ascii_lowercase();
+        let modifier = match lower.as_str() {
+            "control" | "ctrl" => Some("ctrl"),
+            "option" | "alt" => Some("alt"),
+            "shift" => Some("shift"),
+            "command" | "cmd" | "super" | "meta" | "win" | "windows" => Some("meta"),
+            "commandorcontrol" | "commandorctrl" | "cmdorcontrol" | "cmdorctrl" => {
+                Some("cmdorctrl")
+            }
+            _ => None,
+        };
+
+        if let Some(modifier) = modifier {
+            let rank = if is_macos {
+                match modifier {
+                    "ctrl" => 0,
+                    "alt" => 1,
+                    "shift" => 2,
+                    _ => 3,
+                }
+            } else {
+                match modifier {
+                    "ctrl" | "cmdorctrl" => 0,
+                    "alt" => 1,
+                    "shift" => 2,
+                    _ => 3,
+                }
+            };
+            modifiers.push((modifier, rank));
+        } else {
+            key = capitalize_hotkey_key(&lower);
+        }
+    }
+
+    modifiers.sort_by_key(|(_, rank)| *rank);
+    let mut display: Vec<String> = modifiers
+        .into_iter()
+        .map(|(modifier, _)| {
+            if is_macos {
+                match modifier {
+                    "ctrl" => "⌃",
+                    "alt" => "⌥",
+                    "shift" => "⇧",
+                    "meta" | "cmdorctrl" => "⌘",
+                    _ => modifier,
+                }
+            } else {
+                match modifier {
+                    "ctrl" | "cmdorctrl" => "Ctrl",
+                    "alt" => "Alt",
+                    "shift" => "Shift",
+                    "meta" => "Win",
+                    _ => modifier,
+                }
+            }
+            .to_string()
+        })
+        .collect();
+    if !key.is_empty() {
+        display.push(key);
+    }
+    display.join(if is_macos { "" } else { "+" })
+}
+
+#[cfg(target_os = "macos")]
+fn set_manager_activation(app: &AppHandle, manager_visible: bool) {
+    let policy = if manager_visible {
+        tauri::ActivationPolicy::Regular
+    } else {
+        tauri::ActivationPolicy::Accessory
+    };
+    let _ = app.set_activation_policy(policy);
+    let _ = app.set_dock_visibility(manager_visible);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_manager_activation(_app: &AppHandle, _manager_visible: bool) {}
 
 fn manager_title(settings: &Settings) -> &'static str {
     if use_chinese(&settings.language) {
@@ -477,16 +592,17 @@ fn apply_window_preferences(app: &AppHandle, settings: &Settings) {
 }
 
 fn build_tray_menu(app: &AppHandle, settings: &Settings) -> tauri::Result<Menu<tauri::Wry>> {
+    let hotkey = format_hotkey_for_display(&settings.hotkey, cfg!(target_os = "macos"));
     let (open_label, call_label, quit_label) = if use_chinese(&settings.language) {
         (
             "打开 Prompt 管理".to_string(),
-            format!("调用 Prompt ({})", settings.hotkey),
+            format!("调用 Prompt ({hotkey})"),
             "退出".to_string(),
         )
     } else {
         (
             "Open Prompt Manager".to_string(),
-            format!("Call Prompt ({})", settings.hotkey),
+            format!("Call Prompt ({hotkey})"),
             "Quit".to_string(),
         )
     };
@@ -532,6 +648,7 @@ fn hide_main(app: AppHandle) {
 
 #[tauri::command]
 fn open_manager(app: AppHandle) {
+    set_manager_activation(&app, true);
     let settings = get_settings_inner(&app);
     match app.get_webview_window("manager") {
         Some(win) => {
@@ -738,11 +855,7 @@ fn prompt_install_update(app: &AppHandle, version: &str) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.show();
-                let _ = win.set_focus();
-                let _ = app.emit("main-shown", ());
-            }
+            open_manager(app.clone());
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -752,6 +865,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .on_window_event(|_window, _event| {
+            #[cfg(target_os = "macos")]
+            if _window.label() == "manager" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+                    api.prevent_close();
+                    let _ = _window.hide();
+                    set_manager_activation(_window.app_handle(), false);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             list_prompts,
             save_prompt,
@@ -776,8 +899,16 @@ pub fn run() {
             let settings = get_settings_inner(&app_handle);
             let menu = build_tray_menu(&app_handle, &settings)?;
 
+            #[cfg(target_os = "macos")]
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!(
+                "../icons/tray-iconTemplate@2x.png"
+            ))?;
+            #[cfg(not(target_os = "macos"))]
+            let tray_icon = app.default_window_icon().unwrap().clone();
+
             TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
+                .icon_as_template(cfg!(target_os = "macos"))
                 .menu(&menu)
                 .tooltip("PromptDock")
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -788,8 +919,9 @@ pub fn run() {
                 })
                 .build(app)?;
 
+            set_manager_activation(&app_handle, false);
             register_hotkey(&app_handle, &settings.hotkey)?;
-            apply_autostart(&app_handle, settings.autostart);
+            let _ = apply_autostart(&app_handle, settings.autostart);
             apply_window_preferences(&app_handle, &settings);
 
             if settings.auto_check_update {
@@ -902,7 +1034,7 @@ mod tests {
         conn.execute_batch("CREATE TABLE settings (k TEXT PRIMARY KEY, v TEXT NOT NULL);")
             .unwrap();
         let settings = read_settings(&conn);
-        assert_eq!(settings.hotkey, "ctrl+shift+space");
+        assert_eq!(settings.hotkey, DEFAULT_GLOBAL_HOTKEY);
         assert_eq!(settings.theme, "auto");
         assert_eq!(settings.language, "auto");
         assert!(!settings.autostart);
@@ -922,5 +1054,18 @@ mod tests {
         assert!(!is_valid_key_binding("+"));
         assert!(!is_valid_key_binding("ctrl+shift"));
         assert!(!is_valid_key_binding("ctrl+enter+x"));
+    }
+
+    #[test]
+    fn hotkey_display_uses_platform_modifier_names() {
+        assert_eq!(
+            format_hotkey_for_display("cmdorctrl+shift+space", false),
+            "Ctrl+Shift+Space"
+        );
+        assert_eq!(
+            format_hotkey_for_display("cmdorctrl+shift+space", true),
+            "⇧⌘Space"
+        );
+        assert_eq!(format_hotkey_for_display("command+alt+k", true), "⌥⌘K");
     }
 }

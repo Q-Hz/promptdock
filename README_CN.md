@@ -137,7 +137,7 @@ macOS:   ~/Library/Application Support/com.promptdock.app/prompts.db
 
 ### 环境要求
 
-- [Node.js](https://nodejs.org/) 20 LTS 或更高版本
+- [Node.js](https://nodejs.org/) 22 LTS（22.6 或更高版本）
 - [Rust](https://rustup.rs/) stable 工具链
 - Windows：Microsoft C++ Build Tools（**Desktop development with C++** 工作负载）和 Microsoft Edge WebView2 Runtime
 - macOS：Xcode Command Line Tools（运行 `xcode-select --install`）

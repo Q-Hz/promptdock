@@ -3,14 +3,19 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { api, type Settings } from "../lib/api";
 import { t, translateApiError, type MessageKey } from "../lib/i18n";
 import { applyClientSettings } from "../lib/preferences";
-import { DEFAULT_KEY_BINDINGS } from "../lib/keybindings";
+import {
+  DEFAULT_GLOBAL_HOTKEY,
+  DEFAULT_KEY_BINDINGS,
+  bindingFromKeyboardEvent,
+  formatKeybinding,
+} from "../lib/keybindings";
 
 const emit = defineEmits<{ (e: "close"): void }>();
 
 type RecordTarget = "hotkey" | "advanceKey" | "newlineKey" | "backKey";
 
 const settings = ref<Settings>({
-  hotkey: "ctrl+shift+space",
+  hotkey: DEFAULT_GLOBAL_HOTKEY,
   autostart: false,
   theme: "auto",
   language: "auto",
@@ -131,22 +136,16 @@ function startRecord(target: RecordTarget) {
 function onHotkeyKeydown(e: KeyboardEvent) {
   if (!recordTarget.value) return;
   e.preventDefault();
-  const parts: string[] = [];
-  if (e.ctrlKey) parts.push("ctrl");
-  if (e.altKey) parts.push("alt");
-  if (e.shiftKey) parts.push("shift");
-  const key = e.key.toLowerCase();
-  if (["control", "alt", "shift"].includes(key)) return;
-  parts.push(key === " " ? "space" : key);
-  const value = parts.join("+");
   const target = recordTarget.value;
+  const value = bindingFromKeyboardEvent(e, target === "hotkey");
+  if (!value) return;
   if (target === "hotkey") hotkeyDraft.value = value;
   else settings.value[target] = value;
   recordTarget.value = null;
 }
 
 async function save() {
-  settings.value.hotkey = hotkeyDraft.value || "ctrl+shift+space";
+  settings.value.hotkey = hotkeyDraft.value || DEFAULT_GLOBAL_HOTKEY;
   try {
     await api.setSettings({ ...settings.value });
     originalSettings.value = { ...settings.value };
@@ -182,7 +181,7 @@ function cancel() {
             @keydown="onHotkeyKeydown"
             @click="startRecord('hotkey')"
           >
-            {{ recordTarget === "hotkey" ? t("pressHotkey") : hotkeyDraft }}
+            {{ recordTarget === "hotkey" ? t("pressHotkey") : formatKeybinding(hotkeyDraft) }}
           </code>
           <button class="rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600" @click="startRecord('hotkey')">{{ t("change") }}</button>
         </div>
@@ -199,7 +198,7 @@ function cancel() {
             @keydown="onHotkeyKeydown"
             @click="startRecord(row.field)"
           >
-            {{ recordTarget === row.field ? t("pressHotkey") : settings[row.field] }}
+            {{ recordTarget === row.field ? t("pressHotkey") : formatKeybinding(settings[row.field]) }}
           </code>
           <button class="rounded-md border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-600" @click="startRecord(row.field)">{{ t("change") }}</button>
         </div>

@@ -44,7 +44,8 @@ const zh = {
   keyBack: "返回上一界面",
   pressHotkey: "请按下新的快捷键组合…",
   change: "修改",
-  autostart: "Windows 启动时运行 PromptDock",
+  autostart: "登录时运行 PromptDock",
+  autostartFailed: "无法更新登录自启动设置：{error}",
   updates: "软件更新",
   autoCheckUpdate: "启动时自动检查更新",
   checkUpdate: "检查更新",
@@ -136,7 +137,8 @@ const en: Record<keyof typeof zh, string> = {
   keyBack: "Go back",
   pressHotkey: "Press a new keyboard shortcut…",
   change: "Change",
-  autostart: "Run PromptDock when Windows starts",
+  autostart: "Launch PromptDock at login",
+  autostartFailed: "Could not update the login startup setting: {error}",
   updates: "Software updates",
   autoCheckUpdate: "Check for updates on startup",
   checkUpdate: "Check for updates",
@@ -234,6 +236,9 @@ const apiErrorKeys: Record<string, MessageKey> = {
 export function translateApiError(error: unknown): string {
   const value = String(error);
   if (value.startsWith("import.read_failed:")) return t("importReadFailed");
+  if (value.startsWith("settings.autostart_failed:")) {
+    return t("autostartFailed", { error: value.slice("settings.autostart_failed:".length) });
+  }
   const key = apiErrorKeys[value];
   return key ? t(key) : value;
 }

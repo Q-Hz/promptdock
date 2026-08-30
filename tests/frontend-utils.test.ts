@@ -7,7 +7,7 @@ import {
   renderBody,
   type Prompt,
 } from "../src/lib/api.ts";
-import { setLanguage, t } from "../src/lib/i18n.ts";
+import { setLanguage, t, translateApiError } from "../src/lib/i18n.ts";
 
 const prompts: Prompt[] = [
   {
@@ -98,4 +98,12 @@ test("the centralized language resources switch between Chinese and English", ()
   setLanguage("en");
   assert.equal(t("generatePrompt"), "Generate Prompt");
   assert.equal(t("searchPlaceholder"), "Search title, tags, or folder…");
+});
+
+test("autostart failures keep the platform-neutral backend detail", () => {
+  setLanguage("zh");
+  assert.equal(
+    translateApiError("settings.autostart_failed:permission denied"),
+    "无法更新登录自启动设置：permission denied"
+  );
 });
