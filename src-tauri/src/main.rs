@@ -982,17 +982,24 @@ mod tests {
     }
 
     #[test]
-    fn bundled_defaults_contain_only_the_five_approved_prompts() {
+    fn bundled_defaults_contain_the_twelve_approved_prompts() {
         let prompts = default_prompts();
         let titles: HashSet<_> = prompts.iter().map(|prompt| prompt.title.as_str()).collect();
         let expected = HashSet::from([
-            "提示词标准化",
+            "Summarize in bullet points",
+            "Rewrite — change tone",
             "Code review",
             "Explain this code",
+            "Debug this error",
+            "Turn notes into an email",
+            "Reply to this email",
             "Brainstorm ideas",
+            "Break down a project",
             "Cold outreach email",
+            "Prompt Standardization",
+            "提示词标准化",
         ]);
-        assert_eq!(prompts.len(), 5);
+        assert_eq!(prompts.len(), 12);
         assert_eq!(titles, expected);
     }
 
