@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="README_attachment/zh/logo.png" alt="PromptDock Logo" width="128"/>
+<img src="README_attachment/logo.png" alt="PromptDock Logo" width="128"/>
 
 # PromptDock
 
