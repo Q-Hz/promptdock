@@ -61,7 +61,7 @@ export function selectReleaseArtifacts(files: string[], version: string): Releas
     (file) => file.endsWith(".dmg") || file.endsWith(".app.tar.gz")
   );
   if (macPayloads.some((file) => /(?:x86_64|intel|universal)/i.test(file))) {
-    throw new Error("发现非 Apple Silicon 的 macOS 产物；v1.4.0 只支持 Apple Silicon。");
+    throw new Error("发现非 Apple Silicon 的 macOS 产物；PromptDock macOS 当前只支持 Apple Silicon。");
   }
 
   const macDmgFileName = requireSingleFile(files, (file) => file.endsWith(".dmg"), "macOS DMG");
