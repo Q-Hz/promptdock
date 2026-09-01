@@ -4,7 +4,7 @@
 
 # PromptDock
 
-**A fast, local-first prompt manager and launcher for Windows and macOS.**
+**A lightweight prompt manager and launcher for Windows and macOS.**
 
 [![Version](https://img.shields.io/badge/version-1.5.0-2563eb?style=flat-square)](./package.json)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4?style=flat-square)](#system-requirements)

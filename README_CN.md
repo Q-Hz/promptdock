@@ -4,7 +4,7 @@
 
 # PromptDock
 
-**一款快速、本地优先的 Windows 与 macOS Prompt 管理与调用工具。**
+**一款轻量的 Windows 与 macOS Prompt 管理与调用工具。**
 
 [![版本](https://img.shields.io/badge/version-1.5.0-2563eb?style=flat-square)](./package.json)
 [![平台](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4?style=flat-square)](#系统要求)
