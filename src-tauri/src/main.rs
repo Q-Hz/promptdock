@@ -1,9 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod import_logic;
+
 use std::fs;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{Menu, MenuItem},
@@ -79,7 +83,7 @@ fn init_db(app: &AppHandle) -> Connection {
     conn
 }
 
-fn insert_prompt(conn: &Connection, p: &Prompt) -> rusqlite::Result<()> {
+pub(crate) fn insert_prompt(conn: &Connection, p: &Prompt) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO prompts (id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
@@ -99,7 +103,7 @@ fn insert_prompt(conn: &Connection, p: &Prompt) -> rusqlite::Result<()> {
     .map(|_| ())
 }
 
-fn row_to_prompt(row: &rusqlite::Row) -> rusqlite::Result<Prompt> {
+pub(crate) fn row_to_prompt(row: &rusqlite::Row) -> rusqlite::Result<Prompt> {
     let tags: String = row.get(3)?;
     Ok(Prompt {
         id: row.get(0)?,
@@ -686,7 +690,7 @@ fn export_prompts(state: tauri::State<DbState>, path: String) -> Result<(), Stri
     .map_err(|e| e.to_string())
 }
 
-fn validate_import_document(data: &serde_json::Value) -> Result<Vec<Prompt>, String> {
+pub(crate) fn validate_import_document(data: &serde_json::Value) -> Result<Vec<Prompt>, String> {
     let format = data
         .get("format")
         .and_then(|value| value.as_str())
@@ -719,49 +723,218 @@ fn import_prompts(
     path: String,
     replace: bool,
 ) -> Result<usize, String> {
-    let content = fs::read_to_string(&path).map_err(|e| format!("import.read_failed:{e}"))?;
-    let data: serde_json::Value =
-        serde_json::from_str(&content).map_err(|_| "import.invalid_json".to_string())?;
-    let prompts = validate_import_document(&data)?;
+    // 追加导入已迁移到 precheck_import / commit_import，本命令仅保留覆盖模式（PRD 8.6）
+    if !replace {
+        return Err("import.append_removed".into());
+    }
+    let prompts = import_logic::read_import_file(&path)?;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    if replace {
-        tx.execute("DELETE FROM prompts", [])
-            .map_err(|e| e.to_string())?;
-    }
+    tx.execute("DELETE FROM prompts", [])
+        .map_err(|e| e.to_string())?;
     for p in &prompts {
-        // 同名但 id 不同的旧条目：保留其 id 与使用记录，内容更新为文件版本
-        let conflicting_id: Option<String> = tx
-            .query_row(
-                "SELECT id FROM prompts WHERE title = ?1 AND id <> ?2",
-                params![p.title, p.id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
-        if let Some(old_id) = conflicting_id {
-            tx.execute(
-                "UPDATE prompts SET body = ?2, tags = ?3, folder = ?4, favorite = ?5, updated_at = ?6
-                 WHERE id = ?1",
-                params![
-                    old_id,
-                    p.body,
-                    serde_json::to_string(&p.tags).unwrap_or_default(),
-                    p.folder,
-                    p.favorite as i32,
-                    chrono_now(),
-                ],
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            insert_prompt(&tx, p).map_err(|e| e.to_string())?;
-        }
+        insert_prompt(&tx, p).map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(prompts.len())
 }
 
+#[tauri::command]
+fn precheck_import(
+    state: tauri::State<DbState>,
+    path: String,
+) -> Result<import_logic::ImportPrecheck, String> {
+    let prompts = import_logic::read_import_file(&path)?;
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts")
+        .map_err(|e| e.to_string())?;
+    let locals = stmt
+        .query_map([], row_to_prompt)
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(import_logic::precheck(&prompts, &locals))
+}
+
+#[tauri::command]
+fn precheck_import_snapshot(
+    state: tauri::State<DbState>,
+    prompts: Vec<Prompt>,
+) -> Result<import_logic::ImportPrecheck, String> {
+    // stale 后继续使用首次打开文件时的内存快照，不静默重读磁盘文件（PRD 8.4）。
+    import_logic::validate_import_snapshot(&prompts)?;
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts")
+        .map_err(|e| e.to_string())?;
+    let locals = stmt
+        .query_map([], row_to_prompt)
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(import_logic::precheck(&prompts, &locals))
+}
+
+#[tauri::command]
+fn commit_import(
+    state: tauri::State<DbState>,
+    precheck: import_logic::ImportPrecheck,
+    decisions: Vec<import_logic::ImportDecision>,
+) -> Result<import_logic::ImportResult, String> {
+    // 前端提交完整预检查快照；后端在事务内重建当前快照并逐项核对候选集合和业务字段。
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let result = import_logic::commit_import_impl(&tx, &precheck, &decisions, chrono_now())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
 pub struct PendingUpdate(pub Mutex<Option<tauri_plugin_updater::Update>>);
+
+// 关闭/退出握手：prevent_close 后在后台等待前端明确应答，绝不超时放行或丢弃草稿。
+pub struct CloseGate(pub Mutex<Option<Sender<bool>>>);
+pub struct QuitGate(pub Mutex<Option<Sender<bool>>>);
+pub struct ManagerGuardReady(pub AtomicBool);
+
+fn finish_manager_close(app: &AppHandle, allow: bool) {
+    if !allow {
+        if let Some(win) = app.get_webview_window("manager") {
+            let _ = win.set_focus();
+        }
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(win) = app.get_webview_window("manager") {
+            let _ = win.hide();
+        }
+        set_manager_activation(app, false);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        app.state::<ManagerGuardReady>()
+            .0
+            .store(false, Ordering::SeqCst);
+        if let Some(win) = app.get_webview_window("manager") {
+            let _ = win.destroy();
+        }
+    }
+}
+
+fn request_manager_close(app: AppHandle) {
+    if !app.state::<ManagerGuardReady>().0.load(Ordering::SeqCst) {
+        finish_manager_close(&app, false);
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    {
+        let gate = app.state::<CloseGate>();
+        let Ok(mut slot) = gate.0.lock() else {
+            finish_manager_close(&app, false);
+            return;
+        };
+        if slot.is_some() {
+            // 已有握手在等待，忽略重复关闭请求
+            return;
+        }
+        *slot = Some(tx);
+    }
+    if app.emit("manager-close-requested", ()).is_err() {
+        if let Ok(mut slot) = app.state::<CloseGate>().0.lock() {
+            *slot = None;
+        }
+        finish_manager_close(&app, false);
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // 后台等待不会阻塞 UI；只有用户明确答复才允许关闭。
+        let allow = rx.recv().unwrap_or(false);
+        if let Ok(mut slot) = app.state::<CloseGate>().0.lock() {
+            *slot = None;
+        }
+        finish_manager_close(&app, allow);
+    });
+}
+
+fn request_app_quit(app: AppHandle) {
+    // Windows 关闭管理器后窗口会被销毁；窗口不存在就不可能仍持有编辑草稿。
+    if app.get_webview_window("manager").is_none() {
+        app.exit(0);
+        return;
+    }
+    if !app.state::<ManagerGuardReady>().0.load(Ordering::SeqCst) {
+        open_manager(app);
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    {
+        let gate = app.state::<QuitGate>();
+        let Ok(mut slot) = gate.0.lock() else {
+            return;
+        };
+        if slot.is_some() {
+            return;
+        }
+        *slot = Some(tx);
+    }
+    // 显示并聚焦管理器，让用户能看到未保存确认（PRD 9.7）
+    open_manager(app.clone());
+    if app.emit("tray-quit-requested", ()).is_err() {
+        if let Ok(mut slot) = app.state::<QuitGate>().0.lock() {
+            *slot = None;
+        }
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let allow = rx.recv().unwrap_or(false);
+        if let Ok(mut slot) = app.state::<QuitGate>().0.lock() {
+            *slot = None;
+        }
+        if allow {
+            app.exit(0);
+        }
+    });
+}
+
+#[tauri::command]
+fn resolve_close(app: AppHandle, allow: bool) -> Result<(), String> {
+    let tx = app
+        .state::<CloseGate>()
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .as_ref()
+        .cloned();
+    if let Some(tx) = tx {
+        let _ = tx.send(allow);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn resolve_quit(app: AppHandle, allow: bool) -> Result<(), String> {
+    let tx = app
+        .state::<QuitGate>()
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .as_ref()
+        .cloned();
+    if let Some(tx) = tx {
+        let _ = tx.send(allow);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_manager_guard_ready(app: AppHandle, ready: bool) {
+    app.state::<ManagerGuardReady>()
+        .0
+        .store(ready, Ordering::SeqCst);
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -865,13 +1038,12 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .on_window_event(|_window, _event| {
-            #[cfg(target_os = "macos")]
-            if _window.label() == "manager" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+        .on_window_event(|window, event| {
+            // 所有平台统一拦截管理器关闭，交由前端决定（未保存保护 / 取消导入，PRD 9.7）
+            if window.label() == "manager" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
-                    let _ = _window.hide();
-                    set_manager_activation(_window.app_handle(), false);
+                    request_manager_close(window.app_handle().clone());
                 }
             }
         })
@@ -887,6 +1059,12 @@ pub fn run() {
             open_manager,
             export_prompts,
             import_prompts,
+            precheck_import,
+            precheck_import_snapshot,
+            commit_import,
+            resolve_close,
+            resolve_quit,
+            set_manager_guard_ready,
             check_for_updates,
             install_update
         ])
@@ -895,6 +1073,9 @@ pub fn run() {
             let conn = init_db(&app_handle);
             app.manage(DbState(Mutex::new(conn)));
             app.manage(PendingUpdate(Mutex::new(None)));
+            app.manage(CloseGate(Mutex::new(None)));
+            app.manage(QuitGate(Mutex::new(None)));
+            app.manage(ManagerGuardReady(AtomicBool::new(false)));
 
             let settings = get_settings_inner(&app_handle);
             let menu = build_tray_menu(&app_handle, &settings)?;
@@ -917,7 +1098,7 @@ pub fn run() {
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => open_manager(app.clone()),
                     "call" => toggle_main(app),
-                    "quit" => app.exit(0),
+                    "quit" => request_app_quit(app.clone()),
                     _ => {}
                 })
                 .build(app)?;

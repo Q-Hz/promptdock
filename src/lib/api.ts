@@ -27,6 +27,36 @@ export interface UpdateInfo {
   body: string | null;
 }
 
+export type PrecheckKind = "new" | "identical" | "conflict";
+
+export interface PrecheckItem {
+  imported: Prompt;
+  candidates: Prompt[];
+  kind: PrecheckKind;
+}
+
+export interface ImportPrecheck {
+  items: PrecheckItem[];
+  newCount: number;
+  identicalCount: number;
+  conflictCount: number;
+}
+
+export type ImportAction = "keep_local" | "use_imported" | "import_as_new";
+
+export interface ImportDecision {
+  importedId: string;
+  action: ImportAction;
+  targetLocalId?: string | null;
+}
+
+export interface ImportResult {
+  inserted: number;
+  updated: number;
+  insertedAsNew: number;
+  skipped: number;
+}
+
 export interface ParsedVar {
   name: string;
   type: "text" | "select" | "multi";
@@ -50,8 +80,20 @@ export const api = {
   hideMain: (): Promise<void> => invoke("hide_main"),
   openManager: (): Promise<void> => invoke("open_manager"),
   exportPrompts: (path: string): Promise<void> => invoke("export_prompts", { path }),
-  importPrompts: (path: string, replace: boolean): Promise<number> =>
+  // 覆盖模式导入：清空当前全部 Prompt 后导入文件内容
+  importPrompts: (path: string, replace: true): Promise<number> =>
     invoke("import_prompts", { path, replace }),
+  precheckImport: (path: string): Promise<ImportPrecheck> =>
+    invoke("precheck_import", { path }),
+  // stale 后基于首次读取的内存快照重新预检查，不重新读取磁盘文件
+  precheckImportSnapshot: (prompts: Prompt[]): Promise<ImportPrecheck> =>
+    invoke("precheck_import_snapshot", { prompts }),
+  // 提交完整预检查快照，供后端在事务内核对候选关系和业务字段（PRD 8.4）
+  commitImport: (precheck: ImportPrecheck, decisions: ImportDecision[]): Promise<ImportResult> =>
+    invoke("commit_import", { precheck, decisions }),
+  resolveClose: (allow: boolean): Promise<void> => invoke("resolve_close", { allow }),
+  resolveQuit: (allow: boolean): Promise<void> => invoke("resolve_quit", { allow }),
+  setManagerGuardReady: (ready: boolean): Promise<void> => invoke("set_manager_guard_ready", { ready }),
   checkForUpdates: (): Promise<UpdateInfo | null> => invoke("check_for_updates"),
   installUpdate: (): Promise<void> => invoke("install_update"),
 };
