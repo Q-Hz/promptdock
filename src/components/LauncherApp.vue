@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import {
-  api, filterPrompts, parseVariables, renderBody, sortPrompts,
-  type Prompt, type ParsedVar, type Settings,
+  api, filterPrompts, parseVariables, renderBody,
+  type Organization, type Prompt, type ParsedVar, type Settings,
 } from "../lib/api";
+import { emptyOrganization, sortLauncher } from "../lib/organization";
 import { t, translateApiError } from "../lib/i18n";
 import {
   DEFAULT_KEY_BINDINGS, formatKeybinding, matchesKeybinding, type KeyBindings,
@@ -14,6 +15,7 @@ type Stage = "search" | "variables" | "result";
 const stage = ref<Stage>("search");
 const query = ref("");
 const prompts = ref<Prompt[]>([]);
+const organization = ref<Organization>(emptyOrganization());
 const selectedId = ref<string | null>(null);
 const selIndex = ref(0);
 const varValues = ref<Record<string, string | string[]>>({});
@@ -30,7 +32,10 @@ const keyboardNav = ref(false);
 let unlistenMainShown: (() => void) | undefined;
 let unlistenSettings: (() => void) | undefined;
 
-const filtered = computed(() => filterPrompts(sortPrompts(prompts.value), query.value));
+// 置顶优先、非置顶按最近使用；搜索只过滤结果，不改变排序规则（PRD 4.5）
+const filtered = computed(() =>
+  filterPrompts(sortLauncher(prompts.value, organization.value.pinnedOrder), query.value)
+);
 const selected = computed(() => prompts.value.find((p) => p.id === selectedId.value) ?? null);
 const vars = computed(() => (selected.value ? parseVariables(selected.value.body) : []));
 
@@ -59,9 +64,12 @@ async function reload() {
   loading.value = true;
   loadError.value = "";
   try {
-    prompts.value = await api.listPrompts();
+    const library = await api.loadLibrary();
+    prompts.value = library.prompts;
+    organization.value = library.organization;
   } catch (error) {
     prompts.value = [];
+    organization.value = emptyOrganization();
     loadError.value = t("promptLoadFailed", { error: translateApiError(error) });
   } finally {
     loading.value = false;
@@ -297,7 +305,8 @@ function onKeydown(e: KeyboardEvent) {
             @click="choose(p)"
           >
             <span class="flex items-center gap-2 truncate">
-              <span v-if="p.favorite">⭐</span>
+              <span v-if="p.pinned" :aria-label="t('pinned')" :title="t('pinned')">📌</span>
+              <span v-if="p.favorite" :aria-label="t('favorited')" :title="t('favorited')">⭐</span>
               <span class="truncate text-sm font-medium">{{ p.title }}</span>
             </span>
             <span class="ml-2 shrink-0 text-xs opacity-70">

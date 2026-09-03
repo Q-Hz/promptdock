@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use rusqlite::{params, Transaction};
 use serde::{Deserialize, Serialize};
 
+use crate::organization::{Organization, RawOrganization};
 use crate::Prompt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,10 +25,21 @@ pub struct PrecheckItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPrecheck {
+    #[serde(default)]
+    pub organization_adjusted: bool,
     pub items: Vec<PrecheckItem>,
     pub new_count: usize,
     pub identical_count: usize,
     pub conflict_count: usize,
+    // 文件自带的顺序元数据，提交时回传，用于新增记录之间的相对顺序
+    pub organization: Option<Organization>,
+}
+
+// 导入文件解析结果：提示词记录与可选的顺序元数据
+#[derive(Debug, Clone)]
+pub struct ImportFile {
+    pub prompts: Vec<Prompt>,
+    pub organization: Option<RawOrganization>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -60,12 +72,14 @@ pub fn tag_set(tags: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
+// 置顶属于业务字段：仅置顶不同也不能被当作完全相同而跳过（PRD 5.4.1）
 pub fn business_equal(a: &Prompt, b: &Prompt) -> bool {
     normalize_title(&a.title) == normalize_title(&b.title)
         && a.body == b.body
         && tag_set(&a.tags) == tag_set(&b.tags)
         && a.folder == b.folder
         && a.favorite == b.favorite
+        && a.pinned == b.pinned
 }
 
 // 候选查找：先精确 id（唯一即胜出），否则全部同名；仅基于本地快照（PRD 6.3）
@@ -96,7 +110,11 @@ pub fn classify(imported: &Prompt, locals: &[Prompt]) -> PrecheckKind {
     }
 }
 
-pub fn precheck(imported_prompts: &[Prompt], locals: &[Prompt]) -> ImportPrecheck {
+pub fn precheck(
+    imported_prompts: &[Prompt],
+    locals: &[Prompt],
+    raw_organization: Option<&RawOrganization>,
+) -> ImportPrecheck {
     let mut items = Vec::with_capacity(imported_prompts.len());
     for imported in imported_prompts {
         let candidates = find_candidates(imported, locals);
@@ -114,6 +132,12 @@ pub fn precheck(imported_prompts: &[Prompt], locals: &[Prompt]) -> ImportPrechec
         .count();
     let conflict_count = items.len() - new_count - identical_count;
     ImportPrecheck {
+        organization_adjusted: raw_organization
+            .is_some_and(|raw| raw.was_adjusted(imported_prompts)),
+        organization: Some(Organization::from_import(
+            imported_prompts,
+            raw_organization,
+        )),
         items,
         new_count,
         identical_count,
@@ -121,13 +145,16 @@ pub fn precheck(imported_prompts: &[Prompt], locals: &[Prompt]) -> ImportPrechec
     }
 }
 
-pub fn read_import_file(path: &str) -> Result<Vec<Prompt>, String> {
+pub fn read_import_file(path: &str) -> Result<ImportFile, String> {
     let content = std::fs::read_to_string(path).map_err(|e| format!("import.read_failed:{e}"))?;
     let data: serde_json::Value =
         serde_json::from_str(&content).map_err(|_| "import.invalid_json".to_string())?;
-    let prompts = crate::validate_import_document(&data)?;
+    let (prompts, organization) = crate::validate_import_document(&data)?;
     validate_import_snapshot(&prompts)?;
-    Ok(prompts)
+    Ok(ImportFile {
+        prompts,
+        organization,
+    })
 }
 
 pub fn validate_import_snapshot(prompts: &[Prompt]) -> Result<(), String> {
@@ -184,7 +211,7 @@ pub fn precheck_snapshot_matches(expected: &ImportPrecheck, current: &ImportPrec
 
 fn read_locals(tx: &Transaction) -> Result<Vec<Prompt>, String> {
     let mut stmt = tx
-        .prepare("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts")
+        .prepare(&format!("SELECT {} FROM prompts", crate::PROMPT_COLUMNS))
         .map_err(|e| e.to_string())?;
     let locals = stmt
         .query_map([], crate::row_to_prompt)
@@ -212,7 +239,7 @@ pub fn commit_import_impl(
         return Err("import.invalid_decision".into());
     }
     let locals = read_locals(tx)?;
-    let current = precheck(&imported_prompts, &locals);
+    let current = precheck(&imported_prompts, &locals, None);
     if !precheck_snapshot_matches(expected, &current) {
         return Err("import.stale_plan".into());
     }
@@ -235,8 +262,17 @@ pub fn commit_import_impl(
 
     let mut result = ImportResult::default();
     let mut used_targets: HashSet<&str> = HashSet::new();
+    let mut organization = crate::load_organization(tx)?;
 
-    for imported in &imported_prompts {
+    // 追加导入不重排已有本地条目；新增记录之间按文件顺序元数据的相对顺序排列（PRD 5.4.7）
+    let sequence = match &expected.organization {
+        Some(file_organization) => {
+            Organization::import_sequence(&imported_prompts, file_organization)
+        }
+        None => imported_prompts.clone(),
+    };
+
+    for imported in &sequence {
         let candidates = find_candidates(imported, &locals);
         let kind = classify(imported, &locals);
         let decision = decision_map.remove(imported.id.as_str());
@@ -247,6 +283,7 @@ pub fn commit_import_impl(
                 }
                 // New 项原样插入，保留导入文件的全部字段（PRD 8.2）
                 crate::insert_prompt(tx, imported).map_err(|e| e.to_string())?;
+                organization.add_prompt(imported);
                 result.inserted += 1;
             }
             PrecheckKind::Identical => {
@@ -261,6 +298,7 @@ pub fn commit_import_impl(
                 };
                 match decision.action.as_str() {
                     "keep_local" => {
+                        // 保留本地的收藏、置顶、归属与位置（PRD 5.4.3）
                         result.skipped += 1;
                     }
                     "use_imported" => {
@@ -279,7 +317,7 @@ pub fn commit_import_impl(
                         // 普通 UPDATE（非 OR REPLACE）让主键冲突报错并回滚，不能覆盖其他记录。
                         tx.execute(
                             "UPDATE prompts SET id=?2, title=?3, body=?4, tags=?5, folder=?6, favorite=?7,
-                             use_count=?8, last_used_at=?9, created_at=?10, updated_at=?11 WHERE id=?1",
+                             pinned=?8, use_count=?9, last_used_at=?10, created_at=?11, updated_at=?12 WHERE id=?1",
                             params![
                                 target.id,
                                 imported.id,
@@ -288,6 +326,7 @@ pub fn commit_import_impl(
                                 serde_json::to_string(&imported.tags).unwrap_or_default(),
                                 imported.folder,
                                 imported.favorite as i32,
+                                imported.pinned as i32,
                                 imported.use_count,
                                 imported.last_used_at,
                                 imported.created_at,
@@ -295,6 +334,22 @@ pub fn commit_import_impl(
                             ],
                         )
                         .map_err(|e| e.to_string())?;
+                        if target.folder != imported.folder {
+                            // 归属变化：从源位置移除并追加到目标文件夹末尾（PRD 5.4.4）
+                            organization.move_prompt(
+                                &target.id,
+                                &target.folder,
+                                &imported.folder,
+                                None,
+                            );
+                        }
+                        // 归属不变时保留本地位置，只把旧 ID 引用同步到导入 ID
+                        organization.rename_prompt(&target.id, &imported.id);
+                        if !target.pinned && imported.pinned {
+                            organization.set_pinned(&imported.id, true);
+                        } else if target.pinned && !imported.pinned {
+                            organization.set_pinned(&imported.id, false);
+                        }
                         result.updated += 1;
                     }
                     "import_as_new" => {
@@ -305,6 +360,7 @@ pub fn commit_import_impl(
                         created.created_at = commit_ts;
                         created.updated_at = commit_ts;
                         crate::insert_prompt(tx, &created).map_err(|e| e.to_string())?;
+                        organization.add_prompt(&created);
                         result.inserted_as_new += 1;
                     }
                     _ => return Err("import.invalid_decision".into()),
@@ -317,6 +373,10 @@ pub fn commit_import_impl(
         // 存在指向文件中不存在条目的决策
         return Err("import.invalid_decision".into());
     }
+
+    let prompts = read_locals(tx)?;
+    organization.normalize(&prompts);
+    crate::store_organization(tx, &organization)?;
 
     Ok(result)
 }
@@ -334,6 +394,7 @@ mod tests {
             tags: vec![],
             folder: "".into(),
             favorite: false,
+            pinned: false,
             use_count: 0,
             last_used_at: None,
             created_at: 1,
@@ -359,10 +420,15 @@ mod tests {
                 tags TEXT NOT NULL DEFAULT '[]',
                 folder TEXT NOT NULL DEFAULT '',
                 favorite INTEGER NOT NULL DEFAULT 0,
+                pinned INTEGER NOT NULL DEFAULT 0,
                 use_count INTEGER NOT NULL DEFAULT 0,
                 last_used_at INTEGER,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE organization (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                data TEXT NOT NULL
             );",
         )
         .unwrap();
@@ -376,7 +442,7 @@ mod tests {
         commit_ts: i64,
     ) -> Result<ImportResult, String> {
         let locals = read_locals(tx).unwrap();
-        let snapshot = precheck(imported, &locals);
+        let snapshot = precheck(imported, &locals, None);
         commit_import_impl(tx, &snapshot, decisions, commit_ts)
     }
 
@@ -469,7 +535,7 @@ mod tests {
             prompt("l2", "Other", "y"), // identical (id match)
             prompt("i3", "Fresh", "z"), // new
         ];
-        let report = precheck(&imported, &locals);
+        let report = precheck(&imported, &locals, None);
         assert_eq!(report.conflict_count, 1);
         assert_eq!(report.identical_count, 1);
         assert_eq!(report.new_count, 1);
@@ -515,7 +581,7 @@ mod tests {
             }
         );
         let fresh: Prompt = conn
-            .query_row("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id='i1'", [], crate::row_to_prompt)
+            .query_row("SELECT id,title,body,tags,folder,favorite,pinned,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id='i1'", [], crate::row_to_prompt)
             .unwrap();
         assert_eq!(fresh.updated_at, 1); // 保留导入文件的时间字段
     }
@@ -548,7 +614,7 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!(result.updated, 1);
         let updated: Prompt = conn
-            .query_row("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id='i1'", [], crate::row_to_prompt)
+            .query_row("SELECT id,title,body,tags,folder,favorite,pinned,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id='i1'", [], crate::row_to_prompt)
             .unwrap();
         assert_eq!(
             (updated.title.as_str(), updated.body.as_str()),
@@ -682,7 +748,7 @@ mod tests {
         tx.commit().unwrap();
         assert_eq!(result.inserted_as_new, 1);
         let created: Prompt = conn
-            .query_row("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id <> 'l1'", [], crate::row_to_prompt)
+            .query_row("SELECT id,title,body,tags,folder,favorite,pinned,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id <> 'l1'", [], crate::row_to_prompt)
             .unwrap();
         assert_ne!(created.id, "i1");
         assert_eq!(created.title, "Same");
@@ -747,7 +813,7 @@ mod tests {
         let tx = conn.transaction().unwrap();
         crate::insert_prompt(&tx, &prompt("i1", "Different title", "x")).unwrap();
         let imported = vec![prompt("i1", "Fresh title", "z")];
-        let expected = precheck(&imported, &[]);
+        let expected = precheck(&imported, &[], None);
         let err = commit_import_impl(&tx, &expected, &[], 900).unwrap_err();
         assert_eq!(err, "import.stale_plan");
 
@@ -755,7 +821,7 @@ mod tests {
         let mut conn = memory_db();
         let tx = conn.transaction().unwrap();
         let imported = vec![prompt("i1", "Fresh", "z")];
-        let expected = precheck(&imported, &[prompt("l1", "Fresh", "old")]);
+        let expected = precheck(&imported, &[prompt("l1", "Fresh", "old")], None);
         let err = commit_import_impl(&tx, &expected, &[decision("i1", "keep_local", None)], 900)
             .unwrap_err();
         assert_eq!(err, "import.stale_plan");
@@ -782,7 +848,11 @@ mod tests {
         crate::insert_prompt(&conn, &prompt("l1", "Same", "changed after preview")).unwrap();
         let tx = conn.transaction().unwrap();
         let imported = vec![prompt("i1", "Same", "imported")];
-        let expected = precheck(&imported, &[prompt("l1", "Same", "body shown in preview")]);
+        let expected = precheck(
+            &imported,
+            &[prompt("l1", "Same", "body shown in preview")],
+            None,
+        );
         let err = commit_import_impl(
             &tx,
             &expected,
@@ -796,7 +866,7 @@ mod tests {
         let mut conn = memory_db();
         let tx = conn.transaction().unwrap();
         let imported = vec![prompt("i1", "Same", "body")];
-        let expected = precheck(&imported, &[prompt("l1", "Same", "body")]);
+        let expected = precheck(&imported, &[prompt("l1", "Same", "body")], None);
         let err = commit_import_impl(&tx, &expected, &[], 900).unwrap_err();
         assert_eq!(err, "import.stale_plan");
 
@@ -806,7 +876,7 @@ mod tests {
         crate::insert_prompt(&conn, &prompt("l2", "Same", "another")).unwrap();
         let tx = conn.transaction().unwrap();
         let imported = vec![prompt("i1", "Same", "imported")];
-        let expected = precheck(&imported, &[prompt("l1", "Same", "old")]);
+        let expected = precheck(&imported, &[prompt("l1", "Same", "old")], None);
         let err = commit_import_impl(&tx, &expected, &[decision("i1", "keep_local", None)], 900)
             .unwrap_err();
         assert_eq!(err, "import.stale_plan");
@@ -826,7 +896,7 @@ mod tests {
         )
         .unwrap();
         let imported = vec![prompt("i1", "Same", "y")];
-        let expected = precheck(&imported, &[local.clone()]);
+        let expected = precheck(&imported, &[local.clone()], None);
         let result = commit_import_impl(
             &tx,
             &expected,
@@ -837,7 +907,7 @@ mod tests {
         assert_eq!(result.updated, 1);
         tx.commit().unwrap();
         let updated: Prompt = conn
-            .query_row("SELECT id,title,body,tags,folder,favorite,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id='i1'", [], crate::row_to_prompt)
+            .query_row("SELECT id,title,body,tags,folder,favorite,pinned,use_count,last_used_at,created_at,updated_at FROM prompts WHERE id='i1'", [], crate::row_to_prompt)
             .unwrap();
         assert_eq!(updated.use_count, 0);
         assert_eq!(updated.last_used_at, None);
@@ -891,5 +961,86 @@ mod tests {
         let err = commit_current(&tx, &imported, &[decision("i1", "use_imported", None)], 900)
             .unwrap_err();
         assert_eq!(err, "import.invalid_decision");
+    }
+
+    #[test]
+    fn commit_syncs_folder_membership_and_the_pinned_shortcut() {
+        let mut conn = memory_db();
+        let tx = conn.transaction().unwrap();
+        crate::insert_prompt(&tx, &prompt("l1", "Same", "local body")).unwrap();
+        crate::insert_prompt(&tx, &prompt("l2", "Other", "untouched")).unwrap();
+        let mut seeded = Organization::default();
+        seeded.folder_order = vec!["".into()];
+        seeded.prompt_order_by_folder =
+            [("".to_string(), vec!["l1".to_string(), "l2".to_string()])]
+                .into_iter()
+                .collect();
+        crate::store_organization(&tx, &seeded).unwrap();
+
+        // l1 完整替换：归属不变保留本地位置、ID 引用同步，置顶由否变是追加到置顶区末尾
+        let mut replaced = prompt("i1", "Same", "imported body");
+        replaced.pinned = true;
+        // fresh 是新文件夹中的新增记录
+        let mut fresh = prompt("i2", "Fresh", "new body");
+        fresh.folder = "Imported".into();
+
+        let locals = read_locals(&tx).unwrap();
+        let snapshot = precheck(&[replaced.clone(), fresh.clone()], &locals, None);
+        commit_import_impl(
+            &tx,
+            &snapshot,
+            &[decision("i1", "use_imported", Some("l1"))],
+            900,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let organization = crate::load_organization(&tx).unwrap();
+        assert_eq!(
+            organization.prompt_order_by_folder[""],
+            vec!["i1".to_string(), "l2".to_string()]
+        );
+        // 新文件夹追加到文件夹顺序末尾
+        assert_eq!(organization.folder_order, vec!["", "Imported"]);
+        assert_eq!(
+            organization.prompt_order_by_folder["Imported"],
+            vec!["i2".to_string()]
+        );
+        assert_eq!(organization.pinned_order, vec!["i1".to_string()]);
+    }
+
+    #[test]
+    fn commit_import_as_new_appends_to_the_target_folder_and_pinned_area() {
+        let mut conn = memory_db();
+        let tx = conn.transaction().unwrap();
+        crate::insert_prompt(&tx, &prompt("l1", "Same", "local")).unwrap();
+        let mut seeded = Organization::default();
+        seeded.folder_order = vec!["".into()];
+        seeded.prompt_order_by_folder = [(String::new(), vec!["l1".to_string()])]
+            .into_iter()
+            .collect();
+        crate::store_organization(&tx, &seeded).unwrap();
+
+        let mut imported = prompt("i1", "Same", "imported");
+        imported.pinned = true;
+        let locals = read_locals(&tx).unwrap();
+        let snapshot = precheck(&[imported], &locals, None);
+        commit_import_impl(
+            &tx,
+            &snapshot,
+            &[decision("i1", "import_as_new", None)],
+            900,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+
+        let tx = conn.transaction().unwrap();
+        let organization = crate::load_organization(&tx).unwrap();
+        let members = &organization.prompt_order_by_folder[""];
+        assert_eq!(members.len(), 2);
+        assert_eq!(members[0], "l1");
+        assert_eq!(organization.pinned_order.len(), 1);
+        assert_eq!(organization.pinned_order[0], members[1]);
     }
 }

@@ -5,10 +5,29 @@ export interface Prompt {
   tags: string[];
   folder: string;
   favorite: boolean;
+  pinned: boolean;
   useCount: number;
   lastUsedAt: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+// 手动组织结果。顺序只描述排列，归属看 folder、置顶看 pinned。
+export interface Organization {
+  folderOrder: string[];
+  promptOrderByFolder: Record<string, string[]>;
+  pinnedOrder: string[];
+}
+
+export interface Library {
+  prompts: Prompt[];
+  organization: Organization;
+}
+
+// 目标字段更新与跨文件夹移动的返回值：只带回受影响的记录与最新顺序
+export interface PromptUpdate {
+  prompt: Prompt;
+  organization: Organization;
 }
 
 export interface Settings {
@@ -36,10 +55,12 @@ export interface PrecheckItem {
 }
 
 export interface ImportPrecheck {
+  organizationAdjusted?: boolean;
   items: PrecheckItem[];
   newCount: number;
   identicalCount: number;
   conflictCount: number;
+  organization: Organization | null;
 }
 
 export type ImportAction = "keep_local" | "use_imported" | "import_as_new";
@@ -70,24 +91,44 @@ function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 export const api = {
-  listPrompts: (): Promise<Prompt[]> => invoke("list_prompts"),
+  // 一次取回提示词与顺序数据，避免两次调用之间被其他窗口改写
+  loadLibrary: (): Promise<Library> => invoke("load_library"),
   savePrompt: (p: Prompt): Promise<Prompt> => invoke("save_prompt", { prompt: p }),
   deletePrompt: (id: string): Promise<void> => invoke("delete_prompt", { id }),
   markUsed: (id: string): Promise<void> => invoke("mark_used", { id }),
+  // 目标字段更新：只提交本次组织操作，不顺带写入编辑草稿
+  setFavorite: (id: string, favorite: boolean): Promise<Prompt> =>
+    invoke("set_favorite", { id, favorite }),
+  setPinned: (id: string, pinned: boolean): Promise<PromptUpdate> =>
+    invoke("set_pinned", { id, pinned }),
+  setFolderOrder: (order: string[], expected: Organization): Promise<Organization> =>
+    invoke("set_folder_order", { order, expected }),
+  setPromptOrder: (folder: string, order: string[], expected: Organization): Promise<Organization> =>
+    invoke("set_prompt_order", { folder, order, expected }),
+  setPinnedOrder: (order: string[], expected: Organization): Promise<Organization> =>
+    invoke("set_pinned_order", { order, expected }),
+  // index 为 null 时追加到目标文件夹真实成员末尾（含未显示条目之后）
+  movePrompt: (id: string, toFolder: string, index: number | null, expected: Organization): Promise<PromptUpdate> =>
+    invoke("move_prompt", { id, toFolder, index, expected }),
+  getUiPrefs: (key: string): Promise<string> => invoke("get_ui_prefs", { key }),
+  setUiPrefs: (key: string, value: string): Promise<void> =>
+    invoke("set_ui_prefs", { key, value }),
   copyText: (text: string): Promise<void> => invoke("copy_text", { text }),
   getSettings: (): Promise<Settings> => invoke("get_settings"),
   setSettings: (s: Settings): Promise<void> => invoke("set_settings", { settings: s }),
   hideMain: (): Promise<void> => invoke("hide_main"),
   openManager: (): Promise<void> => invoke("open_manager"),
   exportPrompts: (path: string): Promise<void> => invoke("export_prompts", { path }),
-  // 覆盖模式导入：清空当前全部 Prompt 后导入文件内容
-  importPrompts: (path: string, replace: true): Promise<number> =>
+  // 覆盖模式导入：清空当前全部 Prompt 后导入文件内容与规范化顺序
+  importPrompts: (path: string, replace: true): Promise<{ count: number; organizationAdjusted: boolean }> =>
     invoke("import_prompts", { path, replace }),
   precheckImport: (path: string): Promise<ImportPrecheck> =>
     invoke("precheck_import", { path }),
   // stale 后基于首次读取的内存快照重新预检查，不重新读取磁盘文件
-  precheckImportSnapshot: (prompts: Prompt[]): Promise<ImportPrecheck> =>
-    invoke("precheck_import_snapshot", { prompts }),
+  precheckImportSnapshot: (
+    prompts: Prompt[],
+    organization: Organization | null
+  ): Promise<ImportPrecheck> => invoke("precheck_import_snapshot", { prompts, organization }),
   // 提交完整预检查快照，供后端在事务内核对候选关系和业务字段（PRD 8.4）
   commitImport: (precheck: ImportPrecheck, decisions: ImportDecision[]): Promise<ImportResult> =>
     invoke("commit_import", { precheck, decisions }),
@@ -173,13 +214,6 @@ export function renderBody(body: string, values: Record<string, string | string[
     const value = values[name];
     if (Array.isArray(value)) return value.join(separator);
     return value ?? "";
-  });
-}
-
-export function sortPrompts(prompts: Prompt[]): Prompt[] {
-  return [...prompts].sort((a, b) => {
-    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-    return (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0);
   });
 }
 

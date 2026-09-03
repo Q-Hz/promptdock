@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "PromptDock",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "identifier": "com.promptdock.app",
   "build": {
     "frontendDist": "../dist",
@@ -28,6 +28,7 @@
       },
       {
         "label": "manager",
+        "dragDropEnabled": false,
         "title": "PromptDock",
         "width": 1080,
         "height": 720,

@@ -6,7 +6,7 @@
 
 **A lightweight prompt manager and launcher for Windows and macOS.**
 
-[![Version](https://img.shields.io/badge/version-1.5.0-2563eb?style=flat-square)](./package.json)
+[![Version](https://img.shields.io/badge/version-1.6.0-2563eb?style=flat-square)](./package.json)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS-0078d4?style=flat-square)](#system-requirements)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/backend-Rust-dea584?style=flat-square)](https://www.rust-lang.org/)

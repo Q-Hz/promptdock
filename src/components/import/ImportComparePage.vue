@@ -199,6 +199,7 @@ const fieldRows = computed(() => {
     fieldRow(t("fieldTags"), local.tags.join(", "), imported.tags.join(", ")),
     fieldRow(t("fieldFolder"), local.folder, imported.folder),
     fieldRow(t("fieldFavorite"), local.favorite ? t("favoriteYes") : t("favoriteNo"), imported.favorite ? t("favoriteYes") : t("favoriteNo")),
+    fieldRow(t("fieldPinned"), local.pinned ? t("favoriteYes") : t("favoriteNo"), imported.pinned ? t("favoriteYes") : t("favoriteNo")),
   ];
 });
 
@@ -231,6 +232,7 @@ defineExpose({ hasAnyProgress });
       >{{ busy ? t("importing") : t("confirmImport") }}</button>
     </header>
 
+    <p v-if="precheck.organizationAdjusted" role="status" class="shrink-0 px-4 py-2 text-xs text-amber-700 dark:text-amber-300">{{ t("importOrganizationAdjusted") }}</p>
     <div class="min-h-0 flex-1" :inert="busy ? true : undefined">
       <ResizableSplit axis="columns" :label="t('resizeConflictList')" :initial-size="264" :min-first="180" :min-second="520">
         <template #first>

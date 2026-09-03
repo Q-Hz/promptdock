@@ -1,12 +1,12 @@
 {
   "name": "promptdock",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "test": "node --experimental-strip-types --test tests/frontend-utils.test.ts tests/keybindings.test.ts tests/generate-latest-json.test.ts tests/compare.test.ts tests/unsaved.test.ts tests/import-selection.test.ts",
+    "test": "node --experimental-strip-types --test tests/frontend-utils.test.ts tests/keybindings.test.ts tests/generate-latest-json.test.ts tests/compare.test.ts tests/unsaved.test.ts tests/import-selection.test.ts tests/organization.test.ts tests/layout-prefs.test.ts",
     "latest-json": "node scripts/generate-latest-json.ts",
     "tauri": "tauri"
   },

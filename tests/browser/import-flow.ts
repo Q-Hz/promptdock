@@ -3,7 +3,7 @@
 // window.importFixture lets browser tests settle requests explicitly, including failures.
 import { createApp } from "vue";
 import ManagerApp from "../../src/components/ManagerApp.vue";
-import type { ImportDecision, ImportPrecheck, Prompt } from "../../src/lib/api";
+import type { ImportDecision, ImportPrecheck, Organization, Prompt } from "../../src/lib/api";
 import { setLanguage } from "../../src/lib/i18n";
 import "../../src/style.css";
 
@@ -12,13 +12,29 @@ setLanguage(query.get("lang") === "en" ? "en" : "zh");
 document.documentElement.classList.toggle("dark", query.get("theme") === "dark");
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const prompt = (id: string, title: string, body: string): Prompt => ({
-  id, title, body, tags: ["test"], folder: "Fixture", favorite: false,
+  id, title, body, tags: ["test"], folder: "Fixture", favorite: false, pinned: false,
   useCount: 0, lastUsedAt: null, createdAt: 1, updatedAt: 2,
 });
 let records = [prompt("local-a", "条目 A", "本地正文 A"), prompt("local-b", "条目 B", "本地正文 B")];
 const incoming = [prompt("import-a", "条目 A", "导入正文 A"), prompt("import-b", "条目 B", "导入正文 B")];
+// 顺序数据由当前记录推导，夹具不需要维护独立的手动排序
+const organizationOf = (list: Prompt[]): Organization => {
+  const folderOrder: string[] = [];
+  const promptOrderByFolder: Record<string, string[]> = {};
+  for (const record of list) {
+    if (!folderOrder.includes(record.folder)) folderOrder.push(record.folder);
+    (promptOrderByFolder[record.folder] ??= []).push(record.id);
+  }
+  return {
+    folderOrder,
+    promptOrderByFolder,
+    pinnedOrder: list.filter((record) => record.pinned).map((record) => record.id),
+  };
+};
 const makePrecheck = (clear: boolean): ImportPrecheck => ({
   newCount: clear ? 2 : 0, identicalCount: 0, conflictCount: clear ? 0 : 2,
+  organization: null,
+  organizationAdjusted: query.get("warnings") === "1",
   items: incoming.map((imported, i) => ({
     imported: clone(imported), kind: clear ? "new" : "conflict",
     candidates: clear ? [] : [clone(records[query.get("targets") === "duplicate" ? 0 : i])],
@@ -44,6 +60,7 @@ window.alert = (message) => { state.alerts.push(String(message)); };
     open: async () => "synthetic-import.json",
     ask: async (message: string) => {
       state.questions.push(message);
+      if (query.get("replace") === "1") return true;
       if (state.questions.length === 1) return false; // Merge, not replace.
       state.awaitingAnswer = true;
       return new Promise<boolean>((resolve) => {
@@ -54,7 +71,13 @@ window.alert = (message) => { state.alerts.push(String(message)); };
   core: { invoke: async (command: string, args?: any) => {
     state.calls.push({ command, args: args ? clone(args) : undefined });
     switch (command) {
-      case "list_prompts": return clone(records);
+      case "load_library":
+        return { prompts: clone(records), organization: organizationOf(records) };
+      case "get_ui_prefs": return "";
+      case "set_ui_prefs": return;
+      case "import_prompts":
+        records = clone(incoming);
+        return { count: records.length, organizationAdjusted: query.get("warnings") === "1" };
       case "set_manager_guard_ready":
       case "resolve_close":
       case "resolve_quit": return;

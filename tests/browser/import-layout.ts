@@ -16,17 +16,17 @@ api.copyText = async (text) => { document.body.dataset.copied = text; };
 
 const body = Array.from({ length: 60 }, (_, i) => `${i + 1}. 请根据输入整理重点，并说明理由。 / Summarize the input and explain your reasoning.`).join("\n");
 function prompt(id: string, title: string, changes: Partial<Prompt> = {}): Prompt {
-  return { id, title, body, tags: ["writing"], folder: "Examples", favorite: false,
+  return { id, title, body, tags: ["writing"], folder: "Examples", favorite: false, pinned: false,
     useCount: 5, lastUsedAt: null, createdAt: 1788307200000, updatedAt: 1788393600000, ...changes };
 }
 const precheck: ImportPrecheck = {
-  newCount: 0, identicalCount: 23, conflictCount: 2,
+  newCount: 0, identicalCount: 23, conflictCount: 2, organization: null,
   items: [
     { kind: "conflict", imported: prompt("incoming-one", "摘要写作 / Summary writing", {
       body: body.replace("整理重点", "提炼重点"), tags: ["writing", "review"], useCount: 12,
     }), candidates: [prompt("local-one", "摘要写作 / Summary writing")] },
     { kind: "conflict", imported: prompt("incoming-two", "提示词整理 / Organize prompts", {
-      body: body.replace("说明理由", "列出依据"), folder: "Imported",
+      body: body.replace("说明理由", "列出依据"), folder: "Imported", pinned: true,
     }), candidates: [
       prompt("local-two", "提示词整理 / Organize prompts"),
       prompt("local-three", "提示词整理 / Organize prompts", { folder: "Archive", tags: ["archive"] }),

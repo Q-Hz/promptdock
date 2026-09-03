@@ -7,13 +7,13 @@ import { isDirty, snapshotFromPrompt, type EditorSnapshot } from "../src/lib/uns
 function prompt(overrides: Partial<Prompt> = {}): Prompt {
   return {
     id: "p1", title: "Title", body: "Body", tags: ["a"], folder: "F",
-    favorite: false, useCount: 0, lastUsedAt: null, createdAt: 1, updatedAt: 1,
+    favorite: false, pinned: false, useCount: 0, lastUsedAt: null, createdAt: 1, updatedAt: 1,
     ...overrides,
   };
 }
 
 function snapshot(overrides: Partial<EditorSnapshot> = {}): EditorSnapshot {
-  return { title: "Title", body: "Body", tags: ["a"], folder: "F", favorite: false, ...overrides };
+  return { title: "Title", body: "Body", tags: ["a"], folder: "F", favorite: false, pinned: false, ...overrides };
 }
 
 test("snapshotFromPrompt copies tags defensively", () => {
@@ -32,6 +32,7 @@ test("each editable field change is dirty", () => {
   assert.equal(isDirty(snapshot({ body: "x" }), snapshot()), true);
   assert.equal(isDirty(snapshot({ folder: "x" }), snapshot()), true);
   assert.equal(isDirty(snapshot({ favorite: true }), snapshot()), true);
+  assert.equal(isDirty(snapshot({ pinned: true }), snapshot()), true);
   assert.equal(isDirty(snapshot({ tags: ["b"] }), snapshot()), true);
 });
 
@@ -52,7 +53,7 @@ test("tags normalization-only changes are not dirty (AC-46)", () => {
 });
 
 test("blank new form is not dirty (AC-36)", () => {
-  const blank: EditorSnapshot = { title: "", body: "", tags: [], folder: "", favorite: false };
+  const blank: EditorSnapshot = { title: "", body: "", tags: [], folder: "", favorite: false, pinned: false };
   assert.equal(isDirty(blank, blank), false);
   // 有有效输入后变为脏
   assert.equal(isDirty({ ...blank, body: "x" }, blank), true);
