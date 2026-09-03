@@ -1085,8 +1085,9 @@ pub fn run() {
                 "../icons/tray-iconTemplate@2x.png"
             ))?;
             #[cfg(target_os = "windows")]
-            let tray_icon =
-                tauri::image::Image::from_bytes(include_bytes!("../icons/tray-icon-windows.png"))?;
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!(
+                "../icons/tray-icon-windows-64x64.png"
+            ))?;
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             let tray_icon = app.default_window_icon().unwrap().clone();
 
