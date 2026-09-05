@@ -20,7 +20,7 @@ Thumbs.db
 *.suo
 *.user
 *.sln.docstates
-.workbuddy/
+
 
 # 本地文档
 docs/
@@ -50,9 +50,10 @@ src-tauri/icons/图标文件与使用位置说明.md
 
 # 本地图标设计与一次性处理工具（正式生成资源位于 src-tauri/icons/）
 /scripts/process-app-icon.py
-/src-tauri/icons/app-icon-source-1024*.png
+
 
 # agents
-worklogs/
-AGENTS.md
-CLAUDE.md
+.agents/
+.codex/
+.claude/
+.workbuddy/
