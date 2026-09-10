@@ -4,6 +4,7 @@ fn fixture() -> Connection {
     let mut conn = Connection::open_in_memory().unwrap();
     initialize_db(&mut conn).unwrap();
     conn.execute("DELETE FROM prompts", []).unwrap();
+    conn.execute("DELETE FROM folders", []).unwrap();
     for (id, folder) in [("a1", "A"), ("a2", "A"), ("b1", "B")] {
         insert_prompt(
             &conn,
@@ -23,6 +24,8 @@ fn fixture() -> Connection {
         )
         .unwrap();
     }
+    conn.execute("INSERT INTO folders(name) VALUES ('A'), ('B')", [])
+        .unwrap();
     let organization = Organization::from_import(&read_prompts(&conn).unwrap(), None);
     store_organization(&conn, &organization).unwrap();
     conn
@@ -31,7 +34,11 @@ fn fixture() -> Connection {
 fn snapshot(conn: &Connection) -> serde_json::Value {
     let mut prompts = read_prompts(conn).unwrap();
     prompts.sort_by(|a, b| a.id.cmp(&b.id));
-    serde_json::json!({"prompts": prompts, "organization": load_organization(conn).unwrap()})
+    serde_json::json!({
+        "prompts": prompts,
+        "folders": read_folders(conn).unwrap(),
+        "organization": load_organization(conn).unwrap()
+    })
 }
 
 fn fail_order_writes(conn: &Connection) {
@@ -117,6 +124,8 @@ fn stale_order_cannot_overwrite_a_newer_order_or_new_membership() {
 fn move_rejects_removed_destination_and_invalid_anchor_index_but_allows_uncategorized() {
     let mut conn = fixture();
     delete_prompt_impl(&mut conn, "b1").unwrap();
+    conn.execute("DELETE FROM folders WHERE name='B'", [])
+        .unwrap();
     let before = snapshot(&conn);
     {
         let tx = conn.transaction().unwrap();
@@ -154,6 +163,154 @@ fn move_rejects_changes_to_source_and_target_since_the_drag_started() {
         );
         assert_eq!(snapshot(&conn), before);
     }
+}
+
+#[test]
+fn folder_names_are_trimmed_case_sensitive_and_strictly_validated() {
+    let mut conn = fixture();
+    let expected = read_organization(&conn, &read_prompts(&conn).unwrap()).unwrap();
+    let created = create_folder_impl(&mut conn, "  Notes\u{3000}", &expected).unwrap();
+    assert_eq!(created.folder, "Notes");
+    let created = create_folder_impl(&mut conn, "notes", &created.organization).unwrap();
+    assert_eq!(created.folder, "notes");
+    assert_eq!(
+        create_folder_impl(&mut conn, "Notes", &created.organization).unwrap_err(),
+        "folder.duplicate"
+    );
+    assert_eq!(
+        create_folder_impl(&mut conn, "A\tB", &created.organization).unwrap_err(),
+        "folder.control_character"
+    );
+    assert_eq!(
+        create_folder_impl(&mut conn, &"😀".repeat(51), &created.organization).unwrap_err(),
+        "folder.too_long"
+    );
+}
+
+#[test]
+fn rename_and_delete_folder_update_members_and_order_atomically() {
+    let mut conn = fixture();
+    insert_prompt(
+        &conn,
+        &Prompt {
+            id: "u1".into(),
+            title: "u1".into(),
+            body: String::new(),
+            tags: vec![],
+            folder: String::new(),
+            favorite: false,
+            pinned: false,
+            use_count: 0,
+            last_used_at: None,
+            created_at: 1,
+            updated_at: 1,
+        },
+    )
+    .unwrap();
+    let mut organization = read_organization(&conn, &read_prompts(&conn).unwrap()).unwrap();
+    organization
+        .prompt_order_by_folder
+        .insert("A".into(), vec!["a2".into(), "a1".into()]);
+    organization
+        .prompt_order_by_folder
+        .insert("".into(), vec!["u1".into()]);
+    store_organization(&conn, &organization).unwrap();
+
+    let renamed = rename_folder_impl(&mut conn, "A", "Renamed", &organization).unwrap();
+    assert_eq!(renamed.organization.folder_order, vec!["Renamed", "B", ""]);
+    assert_eq!(
+        renamed.organization.prompt_order_by_folder["Renamed"],
+        vec!["a2", "a1"]
+    );
+    assert!(renamed
+        .prompts
+        .iter()
+        .filter(|prompt| prompt.id == "a1" || prompt.id == "a2")
+        .all(|prompt| prompt.folder == "Renamed" && prompt.favorite && prompt.use_count == 9));
+
+    let deleted = delete_folder_impl(&mut conn, "Renamed", &renamed.organization).unwrap();
+    assert_eq!(deleted.organization.folder_order, vec!["B", ""]);
+    assert_eq!(
+        deleted.organization.prompt_order_by_folder[""],
+        vec!["u1", "a2", "a1"]
+    );
+    assert!(deleted
+        .prompts
+        .iter()
+        .filter(|prompt| prompt.id == "a1" || prompt.id == "a2")
+        .all(|prompt| prompt.folder.is_empty()));
+    assert!(!read_folders(&conn)
+        .unwrap()
+        .contains(&"Renamed".to_string()));
+}
+
+#[test]
+fn folder_mutations_and_prompt_auto_creation_roll_back_on_order_failure() {
+    for operation in ["create", "rename", "delete", "auto-create"] {
+        let mut conn = fixture();
+        let before = snapshot(&conn);
+        let expected = read_organization(&conn, &read_prompts(&conn).unwrap()).unwrap();
+        fail_order_writes(&conn);
+        let error = match operation {
+            "create" => create_folder_impl(&mut conn, "New", &expected).unwrap_err(),
+            "rename" => rename_folder_impl(&mut conn, "A", "New", &expected).unwrap_err(),
+            "delete" => delete_folder_impl(&mut conn, "A", &expected).unwrap_err(),
+            _ => {
+                let mut prompt = read_prompt_by_id(&conn, "a1").unwrap();
+                prompt.id.clear();
+                prompt.folder = "New".into();
+                save_prompt_impl(&mut conn, prompt).unwrap_err()
+            }
+        };
+        assert!(
+            error.contains("injected order failure"),
+            "{operation}: {error}"
+        );
+        assert_eq!(
+            snapshot(&conn),
+            before,
+            "{operation} left partial folder data"
+        );
+    }
+}
+
+#[test]
+fn folder_migration_materializes_only_active_legacy_folders() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE prompts (
+            id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+            tags TEXT NOT NULL DEFAULT '[]', folder TEXT NOT NULL DEFAULT '',
+            favorite INTEGER NOT NULL DEFAULT 0, pinned INTEGER NOT NULL DEFAULT 0,
+            use_count INTEGER NOT NULL DEFAULT 0, last_used_at INTEGER,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE organization (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);
+        INSERT INTO prompts VALUES
+            ('a','A','','[]','A',0,0,0,NULL,1,1),
+            ('b','B','','[]','B',0,0,0,NULL,2,2);",
+    )
+    .unwrap();
+    store_organization(
+        &conn,
+        &Organization {
+            folder_order: vec!["Ghost".into(), "B".into(), "A".into()],
+            prompt_order_by_folder: [
+                ("A".into(), vec!["a".into()]),
+                ("B".into(), vec!["b".into()]),
+            ]
+            .into_iter()
+            .collect(),
+            pinned_order: vec![],
+        },
+    )
+    .unwrap();
+
+    initialize_db(&mut conn).unwrap();
+    assert_eq!(read_folders(&conn).unwrap(), vec!["A", "B"]);
+    let organization = read_organization(&conn, &read_prompts(&conn).unwrap()).unwrap();
+    assert_eq!(organization.folder_order, vec!["B", "A"]);
+    assert!(!organization.folder_order.contains(&"Ghost".to_string()));
 }
 
 #[test]
@@ -217,4 +374,49 @@ fn import_warns_about_invalid_metadata_without_dropping_records() {
     let valid = serde_json::to_value(Organization::from_import(&prompts, None)).unwrap();
     let raw = organization::parse_raw_organization(Some(&valid));
     assert!(!import_logic::precheck(&prompts, &[], raw.as_ref()).organization_adjusted);
+}
+
+#[test]
+fn onboarding_state_distinguishes_fresh_data_from_a_legacy_install() {
+    let mut fresh = Connection::open_in_memory().unwrap();
+    assert!(initialize_db(&mut fresh).unwrap());
+    assert!(!read_onboarding_completed(&fresh).unwrap());
+    // 未明确完成前，每次启动都应继续自动引导。
+    assert!(initialize_db(&mut fresh).unwrap());
+    write_onboarding_completed(&fresh).unwrap();
+    assert!(!initialize_db(&mut fresh).unwrap());
+
+    let mut legacy = Connection::open_in_memory().unwrap();
+    legacy
+        .execute_batch(
+            "CREATE TABLE prompts (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '',
+                tags TEXT NOT NULL DEFAULT '[]',
+                folder TEXT NOT NULL DEFAULT '',
+                favorite INTEGER NOT NULL DEFAULT 0,
+                use_count INTEGER NOT NULL DEFAULT 0,
+                last_used_at INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );",
+        )
+        .unwrap();
+    assert!(!initialize_db(&mut legacy).unwrap());
+    assert!(read_onboarding_completed(&legacy).unwrap());
+}
+
+#[test]
+fn onboarding_migration_does_not_overwrite_an_unknown_database() {
+    let mut unknown = Connection::open_in_memory().unwrap();
+    unknown
+        .execute_batch("CREATE TABLE private_notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL);")
+        .unwrap();
+    assert_eq!(
+        initialize_db(&mut unknown).unwrap_err(),
+        "database.unrecognized_schema"
+    );
+    assert!(!table_exists(&unknown, "settings").unwrap());
+    assert!(table_exists(&unknown, "private_notes").unwrap());
 }

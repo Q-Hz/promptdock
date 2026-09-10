@@ -2,6 +2,7 @@
 //   import('/tests/browser/manager-layout-checks.js').then(m => m.runManagerLayoutChecks())
 // Each group can also run on its own; they restore what they mutate so order does not matter much.
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30));
+const settleScroll = () => new Promise((resolve) => setTimeout(resolve, 120));
 
 const PROMPT_MENU_LABEL = "Prompt 操作";
 const FOLDER_MENU_LABEL = "文件夹操作";
@@ -98,6 +99,8 @@ function menuTrigger(scope, label) {
 async function openRowMenu(section, promptId, label = PROMPT_MENU_LABEL) {
   const row = section.querySelector(`[data-prompt-id="${promptId}"]`);
   if (!row) throw new Error(`Row not visible: ${promptId}`);
+  row.scrollIntoView({ block: "nearest" });
+  await settleScroll();
   const trigger = menuTrigger(row, label);
   if (!trigger) throw new Error(`Menu trigger missing on ${promptId}`);
   trigger.click();
@@ -107,9 +110,29 @@ async function openRowMenu(section, promptId, label = PROMPT_MENU_LABEL) {
   return menu;
 }
 
+async function openRowContextMenu(section, promptId) {
+  const row = section.querySelector(`[data-prompt-id="${promptId}"]`);
+  if (!row) throw new Error(`Row not visible: ${promptId}`);
+  row.scrollIntoView({ block: "nearest" });
+  await settleScroll();
+  const rect = row.getBoundingClientRect();
+  row.dispatchEvent(new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: rect.left + 24,
+    clientY: rect.top + rect.height / 2,
+  }));
+  await tick();
+  const menu = document.querySelector('div[role="menu"]');
+  if (!menu) throw new Error(`Context menu did not open for ${promptId}`);
+  return menu;
+}
+
 async function openFolderMenu(title, label = FOLDER_MENU_LABEL) {
   const section = folderSection(title);
   if (!section) throw new Error(`Folder missing: ${title}`);
+  section.querySelector("header")?.scrollIntoView({ block: "nearest" });
+  await settleScroll();
   const trigger = menuTrigger(section.querySelector("header"), label);
   if (!trigger) throw new Error(`Folder menu trigger missing on ${title}`);
   trigger.click();
@@ -191,11 +214,16 @@ export async function runStructureChecks() {
   check(rows(solo).length === 1, "1-item folder shows its single prompt");
   check(sectionButton(solo, "显示更多") === undefined, "1-item folder must not offer show-more");
 
-  check(!!folderSection("未分类"), "the uncategorized section should use the localized display name");
-  const uncategorized = folderSection("未分类");
+  check(!!folderSection("未分类（系统）"), "the uncategorized section should use the explicit system label");
+  const uncategorized = folderSection("未分类（系统）");
   check(rowIds(uncategorized).join(",") === "uncat-1,uncat-2", `uncategorized rows: ${rowIds(uncategorized)}`);
   // 真实命名为“未分类”的文件夹不会与空字符串键混淆
   check(uncategorized.dataset.sectionKey === "", "uncategorized key must be the empty string");
+
+  const empty = folderSection("EMPTY FOLDER");
+  check(!!empty && countLabel(empty) === "0 条", "an explicit empty folder remains visible with a zero count");
+  check(rows(empty).length === 0 && sectionButton(empty, "显示更多") === undefined,
+    "an empty folder has no rows or batch controls");
 
   const duplicates = folderSection("DUPLICATES");
   check(rowIds(duplicates).join(",") === "dup-1,dup-2", "same-title prompts stay separately addressable");
@@ -454,7 +482,7 @@ export async function runOrderChecks() {
   await clickMenuItem(menu, "移动到文件夹");
   const picker = document.querySelector('div[role="dialog"][data-folder-picker]');
   check(!!picker, "the move-to-folder picker should open");
-  check([...picker.querySelectorAll("button")].some((button) => button.textContent.trim() === "未分类"),
+  check([...picker.querySelectorAll("button")].some((button) => button.textContent.trim() === "未分类（系统）"),
     "the picker must offer the uncategorized target");
   check([...picker.querySelectorAll("button")].some((button) => button.textContent.trim() === "Writing"),
     "the picker lists existing folders with their real names");
@@ -473,16 +501,16 @@ export async function runOrderChecks() {
     "the first batch of the target folder is unchanged");
   check(rowIds(folderSection("WRITING")).includes("solo-1"),
     "the moved prompt is revealed in its new folder even beyond the default batch");
-  check(folderSection("SOLO") === undefined, "an emptied folder is hidden");
+  check(folderSection("SOLO") && countLabel(folderSection("SOLO")) === "0 条", "an emptied explicit folder stays visible");
   check(window.managerFixture.organization().folderOrder.includes("Solo"),
     "the hidden folder keeps its stored position");
 
-  // 空文件夹不再作为移动目标出现（列表按成员生成），改由编辑器归属字段恢复
+  // 空文件夹继续作为移动目标出现
   menu = await openRowMenu(folderSection("WRITING"), "write-1");
   await clickMenuItem(menu, "移动到文件夹");
   const hiddenPicker = document.querySelector('div[role="dialog"][data-folder-picker]');
-  check(![...hiddenPicker.querySelectorAll("button")].some((button) => button.textContent.trim() === "Solo"),
-    "an emptied folder is not offered as a move target while it has no members");
+  check([...hiddenPicker.querySelectorAll("button")].some((button) => button.textContent.trim() === "Solo"),
+    "an explicit empty folder remains available as a move target");
   await pressKey(hiddenPicker.querySelector("input"), "Escape");
   check(document.querySelector('div[role="dialog"][data-folder-picker]') === null, "Escape closes the picker");
 
@@ -499,15 +527,15 @@ export async function runOrderChecks() {
   menu = await openRowMenu(folderSection("SOLO"), "solo-1");
   await clickMenuItem(menu, "移动到文件夹");
   const picker3 = document.querySelector('div[role="dialog"][data-folder-picker]');
-  [...picker3.querySelectorAll("button")].find((button) => button.textContent.trim() === "未分类").click();
+  [...picker3.querySelectorAll("button")].find((button) => button.textContent.trim() === "未分类（系统）").click();
   await tick();
   await until(() => fixtureRecord("solo-1").folder === "", "the uncategorized move to commit");
   await awaitRowInSection("solo-1", "");
   check(fixtureRecord("solo-1").folder === "", "uncategorized must store the empty string");
-  check(rowIds(folderSection("未分类")).includes("solo-1"), "the prompt shows up in the uncategorized section");
+  check(rowIds(folderSection("未分类（系统）")).includes("solo-1"), "the prompt shows up in the uncategorized section");
 
   // 还原：Solo 再次为空，同样通过编辑器归属字段移回
-  check(folderSection("SOLO") === undefined, "moving the last member away hides the folder again");
+  check(folderSection("SOLO") && rows(folderSection("SOLO")).length === 0, "moving the last member away keeps the explicit folder");
   await moveViaEditor("solo-1", "Solo");
   check(countLabel(folderSection("SOLO")) === "1 条", "the Solo folder is back to one member");
   return { group: "order", assertions };
@@ -672,7 +700,9 @@ export async function runSearchChecks() {
 
   // 非空搜索时禁用拖动排序，但保留“移动到文件夹”
   const row = rows(folderSection("WRITING"))[0];
-  check(row.getAttribute("draggable") === "false", "dragging must be disabled during a search");
+  check(row.getAttribute("draggable") !== "true"
+    && row.querySelector('[data-prompt-drag-handle]').getAttribute("draggable") === "false",
+    "the dedicated drag handle must be disabled during a search");
   check(folderSection("WRITING").textContent.includes("清空搜索后可拖动排序"),
     "the disabled state must be explained");
   const menu = await openRowMenu(folderSection("WRITING"), row.dataset.promptId);
@@ -696,8 +726,9 @@ export async function runSearchChecks() {
     "clearing the search restores the previously shown count");
   check(rows(folderSection("WRITING")).length === 0, "clearing the search restores the collapsed folder");
   check(rows(folderSection("WRITING") ?? document.createElement("div")).length === 0, "still collapsed");
-  check(rows(folderSection("NOTE ORGANIZATION"))[0].getAttribute("draggable") === "true",
-    "dragging is allowed again once the search is cleared");
+  check(rows(folderSection("NOTE ORGANIZATION"))[0]
+    .querySelector('[data-prompt-drag-handle]').getAttribute("draggable") === "true",
+    "the dedicated drag handle is enabled again once the search is cleared");
   folderSection("WRITING").querySelector("header button").click();
   await tick();
   sectionButton(folderSection("NOTE ORGANIZATION"), "收起列表").click();
@@ -863,7 +894,7 @@ export async function runLocaleChecks() {
   check(picker.getAttribute("aria-label") === "Move to Folder", `picker label: ${picker.getAttribute("aria-label")}`);
   check(picker.querySelector("input").getAttribute("placeholder") === "Search folders…",
     "the folder filter has an English placeholder");
-  check([...picker.querySelectorAll("button")].some((button) => button.textContent.trim() === "Uncategorized"),
+  check([...picker.querySelectorAll("button")].some((button) => button.textContent.trim() === "Uncategorized (system)"),
     "the uncategorized target uses the English display name");
   check(getComputedStyle(picker).backgroundColor !== "rgb(255, 255, 255)",
     "the picker surface follows the dark theme");
@@ -880,7 +911,7 @@ export async function runLocaleChecks() {
   const folderMenu = await openFolderMenu("WRITING", "Folder actions");
   const folderLabels = [...folderMenu.querySelectorAll('button[role="menuitem"]')]
     .map((button) => button.textContent.trim());
-  check(folderLabels.join("|") === "Move up|Move down", `English folder menu: ${folderLabels.join("|")}`);
+  check(folderLabels.join("|") === "Move up|Move down|Rename|Delete folder", `English folder menu: ${folderLabels.join("|")}`);
   await pressKey(folderMenu.querySelector('button[role="menuitem"]'), "Escape");
   await setText(search, "");
   await until(() => countLabel(folderSection("NOTE ORGANIZATION")) === "30", "the search to clear");
@@ -939,16 +970,21 @@ export async function runBulkFolderChecks() {
   let assertions = 0;
   const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
   const controls = document.querySelector('[data-folder-bulk-actions]');
-  const [expand, collapse] = controls.querySelectorAll('button');
+  const [create, expand, collapse] = controls.querySelectorAll('button');
   const notes = folderSection('NOTE ORGANIZATION');
   const body = document.querySelector('main textarea');
   const originalBody = body.value;
   const savedBefore = saveCount();
   const orderBefore = JSON.stringify(window.managerFixture.organization());
-  check(expand.textContent.trim() === '全部展开' && collapse.textContent.trim() === '全部收起', 'bulk action labels');
+  check(create.getAttribute('aria-label') === '新建文件夹'
+    && expand.getAttribute('aria-label') === '全部展开'
+    && collapse.getAttribute('aria-label') === '全部收起', 'icon bulk actions have accessible labels');
   check(!document.querySelector('aside').textContent.includes('置顶只是快捷入口'), 'remove the pinned explanation');
   check(document.querySelector('aside [role="separator"]') === null, 'remove all folder height handles');
-  check(expand.disabled && !collapse.disabled, 'disable only the already satisfied bulk action');
+  check(!expand.disabled && !collapse.disabled, 'bulk actions stay available even when already satisfied');
+  check(expand.querySelector('path')?.getAttribute('d') === 'm7 14 5 5 5-5M7 10l5-5 5 5'
+    && collapse.querySelector('path')?.getAttribute('d') === 'M7 4l5 4 5-4M7 20l5-4 5 4',
+    'collapse keeps the original expand icon style while pointing inward with clear spacing');
   const more = sectionButton(notes, '显示更多');
   let box = more.getBoundingClientRect();
   const container = notes.getBoundingClientRect();
@@ -961,7 +997,7 @@ export async function runBulkFolderChecks() {
   collapse.click();
   await tick();
   check(sections().every(s => rows(s).length === 0), 'collapse every folder and the pinned section');
-  check(collapse.disabled && !expand.disabled, 'collapsed state updates button availability');
+  check(!collapse.disabled && !expand.disabled, 'collapsed state does not disable either bulk action');
   check(body.value === 'Bulk action unsaved draft' && saveCount() === savedBefore, 'bulk collapse preserves the draft without saving');
   await until(() => Object.values(JSON.parse(window.managerFixture.prefs()['manager-layout'] || '{}').collapsed || {}).filter(Boolean).length === sections().length, 'bulk collapse preferences to persist');
   const search = document.querySelector('aside input');
@@ -981,11 +1017,132 @@ export async function runBulkFolderChecks() {
   check(rows(folderSection('WRITING')).length === 5, 'expand all does not load all records');
   check(body.value === 'Bulk action unsaved draft' && JSON.stringify(window.managerFixture.organization()) === orderBefore, 'bulk actions preserve draft and order');
   await setText(search, 'no-match-for-bulk-controls');
-  check(expand.disabled && collapse.disabled, 'both actions are disabled for empty results');
+  check(!expand.disabled && !collapse.disabled, 'bulk actions remain harmless no-ops for empty results');
   await setText(search, '');
   sectionButton(folderSection('NOTE ORGANIZATION'), '收起列表').click();
   await setText(body, originalBody);
   return { group: 'bulk', assertions };
+}
+
+export async function runFolderCrudChecks() {
+  let assertions = 0;
+  const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
+  const controls = document.querySelector('[data-folder-bulk-actions]');
+  const create = [...controls.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label') === '新建文件夹');
+  create.click();
+  await tick();
+  const createInput = document.querySelector('[data-folder-create-row] input');
+  check(document.activeElement === createInput, 'new-folder input receives focus');
+  await setText(createInput, '  Crud 😀  ');
+  await pressKey(createInput, 'Enter');
+  await until(() => !!folderSection('CRUD 😀'), 'the empty folder to be created');
+  check(countLabel(folderSection('CRUD 😀')) === '0 条', 'a new empty folder shows a zero count');
+  check(lastCall('create_folder')?.args.name === 'Crud 😀', 'create sends the trimmed Unicode name');
+  check(window.managerFixture.organization().folderOrder.at(-1) === 'Crud 😀', 'new folder is appended to the stored order');
+
+  // Exact duplicate stays in edit mode with a nearby validation error.
+  create.click();
+  await tick();
+  const duplicateInput = document.querySelector('[data-folder-create-row] input');
+  await setText(duplicateInput, 'Crud 😀');
+  await pressKey(duplicateInput, 'Enter');
+  check(!!document.querySelector('#folder-create-error'), 'duplicate name shows an inline error');
+  check(document.querySelector('[data-folder-create-row] input').value === 'Crud 😀', 'duplicate input is preserved');
+  await pressKey(document.querySelector('[data-folder-create-row] input'), 'Escape');
+
+  // An empty explicit folder is a valid move target.
+  await moveViaEditor('solo-1', 'Crud 😀');
+  const body = document.querySelector('main textarea');
+  const folderField = document.querySelector('main input[list="folder-list"]');
+  await setText(body, 'Folder CRUD unsaved draft');
+
+  // F2 performs inline rename and preserves the selected prompt's non-folder draft.
+  const crudSection = folderSection('CRUD 😀');
+  const titleButton = crudSection.querySelector('[data-folder-title]');
+  titleButton.focus();
+  await pressKey(titleButton, 'F2');
+  const renameInput = crudSection.querySelector('header input');
+  check(document.activeElement === renameInput, 'F2 focuses the inline rename field');
+  check(renameInput.value === 'Crud 😀', 'rename field is prefilled');
+  await setText(renameInput, 'Renamed / folder');
+  await pressKey(renameInput, 'Enter');
+  await until(() => !!folderSection('RENAMED / FOLDER'), 'folder rename to finish');
+  check(fixtureRecord('solo-1').folder === 'Renamed / folder', 'rename updates every member folder');
+  check(body.value === 'Folder CRUD unsaved draft', 'rename preserves the unsaved body draft');
+  check(folderField.value === 'Renamed / folder', 'untouched folder draft follows the renamed baseline');
+
+  // Right-click reuses the same menu as the ellipsis entry.
+  const renamedHeader = folderSection('RENAMED / FOLDER').querySelector('header');
+  renamedHeader.dispatchEvent(new MouseEvent('contextmenu', {
+    bubbles: true, cancelable: true, clientX: 120, clientY: 180,
+  }));
+  await tick();
+  let menu = document.querySelector('div[role="menu"]');
+  check(!!menu, 'right-click opens the custom folder menu');
+  const labels = [...menu.querySelectorAll('button[role="menuitem"]')].map((button) => button.textContent.trim());
+  check(labels.join('|') === '上移|下移|重命名|删除文件夹', `right-click menu actions: ${labels.join('|')}`);
+
+  // Cancel is the safe path; accepting then moves members to the system group.
+  window.managerFixture.answerDialog(false);
+  await clickMenuItem(menu, '删除文件夹');
+  await tick();
+  check(!!folderSection('RENAMED / FOLDER'), 'cancel keeps the folder and its members');
+  menu = await openFolderMenu('RENAMED / FOLDER');
+  window.managerFixture.answerDialog(true);
+  await clickMenuItem(menu, '删除文件夹');
+  await until(() => !folderSection('RENAMED / FOLDER'), 'folder deletion to finish');
+  check(fixtureRecord('solo-1').folder === '', 'deleting a non-empty folder moves members to uncategorized');
+  check(body.value === 'Folder CRUD unsaved draft' && folderField.value === '',
+    'delete preserves non-folder draft fields and updates the saved folder baseline');
+  check(window.managerFixture.state.confirmed.at(-1).includes('1 条 Prompt')
+    && window.managerFixture.state.confirmed.at(-1).includes('不会被删除'),
+    'non-empty delete confirmation reports the count and preserves prompts');
+  return { group: 'folder-crud', assertions };
+}
+
+export async function runPromptContextChecks() {
+  let assertions = 0;
+  const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
+  const row = folderSection('DUPLICATES').querySelector('[data-prompt-id="dup-2"]');
+  const promptDrag = row.querySelector('[data-prompt-drag-handle]');
+  const promptMenuTrigger = [...row.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label') === 'Prompt 操作');
+  const folderHeader = folderSection('DUPLICATES').querySelector('header');
+  const folderDrag = folderHeader.querySelector('[data-folder-drag-handle]');
+  const folderMenuTrigger = [...folderHeader.querySelectorAll('button')]
+    .find((button) => button.getAttribute('aria-label') === '文件夹操作');
+
+  check(!!promptDrag && !!folderDrag, 'folders and prompts expose explicit drag handles');
+  check(promptDrag.getAttribute('draggable') === 'true' && row.getAttribute('draggable') !== 'true',
+    'only the prompt drag handle starts dragging');
+  check(promptDrag.compareDocumentPosition(promptMenuTrigger) & Node.DOCUMENT_POSITION_FOLLOWING,
+    'the prompt drag handle sits immediately before its action menu');
+  check(folderDrag.compareDocumentPosition(folderMenuTrigger) & Node.DOCUMENT_POSITION_FOLLOWING,
+    'the folder drag handle uses the same right-side placement');
+  check(Math.abs(promptDrag.getBoundingClientRect().width - folderDrag.getBoundingClientRect().width) < 1,
+    'folder and prompt drag handles use the same hit area');
+
+  const draftBody = document.querySelector('main textarea').value;
+  const draftTitle = document.querySelector('main input[placeholder="Prompt 标题"]').value;
+  const menu = await openRowContextMenu(folderSection('DUPLICATES'), 'dup-2');
+  const labels = [...menu.querySelectorAll('button[role="menuitem"]')]
+    .map((button) => button.textContent.trim());
+  check(labels.join('|') === '收藏|置顶|上移|下移|移到文件夹末尾|移动到文件夹|删除 Prompt…',
+    `prompt context menu actions: ${labels.join('|')}`);
+  const deleteItem = [...menu.querySelectorAll('button[role="menuitem"]')]
+    .find((button) => button.textContent.trim() === '删除 Prompt…');
+  check(deleteItem.className.includes('border-t') && getComputedStyle(deleteItem).color !== '',
+    'delete is visually separated as the dangerous final action');
+  await clickMenuItem(menu, '删除 Prompt…');
+  await until(() => !fixtureRecord('dup-2'), 'the context-menu deletion to commit');
+  check(lastCall('delete_prompt')?.args.id === 'dup-2', 'context deletion targets the right-clicked prompt');
+  check(window.managerFixture.state.confirmed.at(-1).includes('Same title'),
+    'context deletion confirms the target prompt title');
+  check(document.querySelector('main textarea').value === draftBody
+    && document.querySelector('main input[placeholder="Prompt 标题"]').value === draftTitle,
+    'deleting another prompt preserves the current editor draft and selection');
+  return { group: 'prompt-context', assertions };
 }
 
 export async function runManagerLayoutChecks() {
@@ -999,6 +1156,8 @@ export async function runManagerLayoutChecks() {
     await runFlagChecks(),
     await runSearchChecks(),
     await runEditorChecks(),
+    await runFolderCrudChecks(),
+    await runPromptContextChecks(),
   ];
   return {
     assertions: results.reduce((total, result) => total + result.assertions, 0),

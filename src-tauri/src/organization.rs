@@ -102,8 +102,19 @@ fn push_unique(list: &mut Vec<String>, item: String) {
 
 impl Organization {
     // 与真实数据对齐：丢弃陈旧 ID、补全漏列成员、新文件夹追加到末尾。
-    // 空文件夹仍保留在 folder_order 中，以便再次出现时恢复原位置。
+    // 兼容调用只把当前被 Prompt 引用的非空名称视为显式文件夹。
     pub fn normalize(&mut self, prompts: &[Prompt]) {
+        let mut explicit_folders = Vec::new();
+        for prompt in prompts {
+            if !prompt.folder.is_empty() {
+                push_unique(&mut explicit_folders, prompt.folder.clone());
+            }
+        }
+        self.normalize_with_folders(prompts, &explicit_folders);
+    }
+
+    // folders 是普通文件夹存在性的权威来源；未分类只在有成员时进入内部顺序。
+    pub fn normalize_with_folders(&mut self, prompts: &[Prompt], folders: &[String]) {
         let mut members: BTreeMap<String, Vec<Prompt>> = BTreeMap::new();
         for prompt in prompts {
             members
@@ -115,13 +126,36 @@ impl Organization {
             list.sort_by_key(fallback_rank);
         }
 
-        let known = dedup(self.folder_order.clone());
-        let mut listed: BTreeSet<String> = known.iter().cloned().collect();
-        let mut missing: Vec<&String> = members
-            .keys()
-            .filter(|folder| !listed.contains(*folder))
+        let mut allowed: BTreeSet<String> = folders
+            .iter()
+            .filter(|folder| !folder.is_empty())
+            .cloned()
             .collect();
-        missing.sort_by(|a, b| {
+        if members.contains_key("") {
+            allowed.insert(String::new());
+        }
+        // 数据修复：被 Prompt 引用的普通文件夹不能因 folders 表缺项而消失。
+        allowed.extend(members.keys().filter(|folder| !folder.is_empty()).cloned());
+
+        let known = dedup(self.folder_order.clone())
+            .into_iter()
+            .filter(|folder| allowed.contains(folder))
+            .collect::<Vec<_>>();
+        let mut listed: BTreeSet<String> = known.iter().cloned().collect();
+        let mut missing: Vec<String> = Vec::new();
+        // 显式文件夹按传入的稳定顺序补全，避免空文件夹按名称意外重排。
+        for folder in folders {
+            if !folder.is_empty() && !listed.contains(folder) {
+                push_unique(&mut missing, folder.clone());
+            }
+        }
+        let mut referenced_missing: Vec<&String> = members
+            .keys()
+            .filter(|folder| {
+                !listed.contains(*folder) && !missing.iter().any(|item| item == *folder)
+            })
+            .collect();
+        referenced_missing.sort_by(|a, b| {
             let first = |folder: &&String| {
                 members
                     .get(*folder)
@@ -130,10 +164,11 @@ impl Organization {
             };
             first(a).cmp(&first(b)).then(a.cmp(b))
         });
+        missing.extend(referenced_missing.into_iter().cloned());
         let mut folder_order = known.clone();
         for folder in missing {
             listed.insert(folder.clone());
-            folder_order.push(folder.clone());
+            folder_order.push(folder);
         }
         self.folder_order = folder_order;
 
@@ -198,7 +233,9 @@ impl Organization {
         let mut folder_order: Vec<String> = Vec::new();
         if let Some(listed) = raw.and_then(|raw| raw.folder_order.as_ref()) {
             for folder in listed {
-                if file_folders.iter().any(|known| known == folder) {
+                // 新版元数据中的非空名称即使没有成员也代表显式空文件夹。
+                // 旧文件中的未分类槽位只有在确有未分类成员时才保留。
+                if !folder.is_empty() || file_folders.iter().any(|known| known == folder) {
                     push_unique(&mut folder_order, folder.clone());
                 }
             }
@@ -267,21 +304,51 @@ impl Organization {
         Organization::from_import(&sorted, None)
     }
 
-    // 导出只包含当前真实文件夹、成员和置顶项。
+    // 导出包含全部显式普通文件夹（含空文件夹），但不把系统未分类写入 folderOrder。
     pub fn for_export(&self, prompts: &[Prompt]) -> Organization {
         let mut exported = self.clone();
-        exported.normalize(prompts);
-        let real: BTreeSet<&str> = prompts
-            .iter()
-            .map(|prompt| prompt.folder.as_str())
-            .collect();
-        exported
+        let explicit = self
             .folder_order
-            .retain(|folder| real.contains(folder.as_str()));
+            .iter()
+            .filter(|folder| !folder.is_empty())
+            .cloned()
+            .collect::<Vec<_>>();
+        exported.normalize_with_folders(prompts, &explicit);
+        exported.folder_order.retain(|folder| !folder.is_empty());
         exported
+    }
+
+    pub fn create_folder(&mut self, name: &str) {
+        if !name.is_empty() {
+            push_unique(&mut self.folder_order, name.to_string());
+        }
+    }
+
+    pub fn rename_folder(&mut self, old_name: &str, new_name: &str) {
+        if old_name == new_name {
+            return;
+        }
+        for folder in &mut self.folder_order {
+            if folder == old_name {
+                *folder = new_name.to_string();
+            }
+        }
+        if let Some(members) = self.prompt_order_by_folder.remove(old_name) {
+            self.prompt_order_by_folder
+                .insert(new_name.to_string(), members);
+        }
+    }
+
+    pub fn delete_folder(&mut self, name: &str) {
+        self.folder_order.retain(|folder| folder != name);
+        let moved = self.prompt_order_by_folder.remove(name).unwrap_or_default();
+        let uncategorized = self
             .prompt_order_by_folder
-            .retain(|folder, _| real.contains(folder.as_str()));
-        exported
+            .entry(String::new())
+            .or_default();
+        for id in moved {
+            push_unique(uncategorized, id);
+        }
     }
 
     pub fn add_prompt(&mut self, prompt: &Prompt) {
@@ -490,8 +557,8 @@ mod tests {
         let b1 = prompt("b1", "B");
         organization.normalize(&[a1.clone(), a2.clone(), b1.clone()]);
 
-        // 空文件夹偏好保留，新文件夹追加到末尾
-        assert_eq!(ids(&organization.folder_order), ["A", "gone", "B"]);
+        // 兼容 normalize 不再把旧无成员槽位误认为显式空文件夹
+        assert_eq!(ids(&organization.folder_order), ["A", "B"]);
         assert_eq!(
             ids(organization.prompt_order_by_folder.get("A").unwrap()),
             ["a2", "a1"]
@@ -574,7 +641,7 @@ mod tests {
             pinned_order: Some(vec!["a2".into()]),
         };
         let organization = Organization::from_import(&prompts, Some(&raw));
-        assert_eq!(ids(&organization.folder_order), ["B", "A"]);
+        assert_eq!(ids(&organization.folder_order), ["B", "A", "ghost"]);
         assert_eq!(
             ids(organization.prompt_order_by_folder.get("A").unwrap()),
             ["a1", "a2"]
@@ -719,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn for_export_drops_empty_folders() {
+    fn for_export_keeps_explicit_empty_folders() {
         let organization = Organization {
             folder_order: vec!["A".into(), "empty".into()],
             prompt_order_by_folder: BTreeMap::from([
@@ -729,7 +796,7 @@ mod tests {
             pinned_order: vec![],
         };
         let exported = organization.for_export(&[prompt("a1", "A")]);
-        assert_eq!(ids(&exported.folder_order), ["A"]);
+        assert_eq!(ids(&exported.folder_order), ["A", "empty"]);
         assert!(!exported.prompt_order_by_folder.contains_key("empty"));
     }
 

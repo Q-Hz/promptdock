@@ -158,9 +158,6 @@ pub fn read_import_file(path: &str) -> Result<ImportFile, String> {
 }
 
 pub fn validate_import_snapshot(prompts: &[Prompt]) -> Result<(), String> {
-    if prompts.is_empty() {
-        return Err("import.no_prompts".into());
-    }
     let mut seen: HashSet<&str> = HashSet::new();
     for prompt in prompts {
         if !seen.insert(prompt.id.as_str()) {
@@ -263,6 +260,19 @@ pub fn commit_import_impl(
     let mut result = ImportResult::default();
     let mut used_targets: HashSet<&str> = HashSet::new();
     let mut organization = crate::load_organization(tx)?;
+
+    // 追加导入先恢复文件声明的全部显式文件夹，包括没有任何 Prompt 的空文件夹。
+    if let Some(file_organization) = &expected.organization {
+        for folder in file_organization
+            .folder_order
+            .iter()
+            .filter(|folder| !folder.is_empty())
+        {
+            tx.execute("INSERT OR IGNORE INTO folders(name) VALUES (?1)", [folder])
+                .map_err(|e| e.to_string())?;
+            organization.create_folder(folder);
+        }
+    }
 
     // 追加导入不重排已有本地条目；新增记录之间按文件顺序元数据的相对顺序排列（PRD 5.4.7）
     let sequence = match &expected.organization {
@@ -375,7 +385,7 @@ pub fn commit_import_impl(
     }
 
     let prompts = read_locals(tx)?;
-    organization.normalize(&prompts);
+    organization.normalize_with_folders(&prompts, &crate::read_folders(tx)?);
     crate::store_organization(tx, &organization)?;
 
     Ok(result)
@@ -429,6 +439,9 @@ mod tests {
             CREATE TABLE organization (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 data TEXT NOT NULL
+            );
+            CREATE TABLE folders (
+                name TEXT PRIMARY KEY
             );",
         )
         .unwrap();
@@ -1042,5 +1055,26 @@ mod tests {
         assert_eq!(members[0], "l1");
         assert_eq!(organization.pinned_order.len(), 1);
         assert_eq!(organization.pinned_order[0], members[1]);
+    }
+
+    #[test]
+    fn merge_import_restores_declared_empty_folders() {
+        let mut conn = memory_db();
+        let tx = conn.transaction().unwrap();
+        let raw = RawOrganization {
+            invalid_fields: false,
+            folder_order: Some(vec!["Empty".into(), "empty".into()]),
+            prompt_order_by_folder: Some(BTreeMap::new()),
+            pinned_order: Some(vec![]),
+        };
+        let snapshot = precheck(&[], &[], Some(&raw));
+        let result = commit_import_impl(&tx, &snapshot, &[], 100).unwrap();
+        assert_eq!(result, ImportResult::default());
+        tx.commit().unwrap();
+        assert_eq!(crate::read_folders(&conn).unwrap(), vec!["Empty", "empty"]);
+        assert_eq!(
+            crate::load_organization(&conn).unwrap().folder_order,
+            vec!["Empty", "empty"]
+        );
     }
 }

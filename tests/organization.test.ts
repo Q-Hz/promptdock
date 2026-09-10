@@ -21,7 +21,7 @@ function organization(overrides: Partial<Organization> = {}): Organization {
 
 const ids = (list: Array<{ id: string }>) => list.map((item) => item.id);
 
-test("folders follow the persisted order and hide empty ones", () => {
+test("folders follow the persisted order and keep explicit empty ones", () => {
   const prompts = [
     prompt("a1", { folder: "Alpha" }),
     prompt("b1", { folder: "Beta" }),
@@ -30,7 +30,8 @@ test("folders follow the persisted order and hide empty ones", () => {
     folderOrder: ["Beta", "Alpha", "Empty"],
     promptOrderByFolder: { Alpha: ["a1"], Beta: ["b1"], Empty: [] },
   }));
-  assert.deepEqual(groups.map((group) => group.key), ["Beta", "Alpha"]);
+  assert.deepEqual(groups.map((group) => group.key), ["Beta", "Alpha", "Empty"]);
+  assert.deepEqual(groups[2].items, []);
   assert.deepEqual(ids(groups[0].items), ["b1"]);
 });
 

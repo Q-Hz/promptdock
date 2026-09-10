@@ -6,7 +6,13 @@ import { fitPopover } from "../../lib/popover";
 // 弹层使用固定定位，避免被条目视口的滚动容器裁掉。
 const props = withDefaults(defineProps<{
   label: string;
-  items: Array<{ id: string; label: string; disabled?: boolean }>;
+  items: Array<{
+    id: string;
+    label: string;
+    disabled?: boolean;
+    danger?: boolean;
+    separatorBefore?: boolean;
+  }>;
   filterable?: boolean;
   filterPlaceholder?: string;
 }>(), { filterable: false, filterPlaceholder: "" });
@@ -17,6 +23,7 @@ const open = ref(false);
 const trigger = ref<HTMLButtonElement | null>(null);
 const filter = ref("");
 const position = ref({ top: 0, left: 0, maxHeight: 0 });
+const contextPoint = ref<{ x: number; y: number } | null>(null);
 
 const visible = computed(() => {
   const query = filter.value.trim().toLowerCase();
@@ -25,7 +32,9 @@ const visible = computed(() => {
 });
 
 function place() {
-  const rect = trigger.value?.getBoundingClientRect();
+  const rect = contextPoint.value
+    ? new DOMRect(contextPoint.value.x, contextPoint.value.y, 0, 0)
+    : trigger.value?.getBoundingClientRect();
   if (!rect) return;
   const element = popup.value;
   if (!element) return;
@@ -34,6 +43,7 @@ function place() {
 
 async function toggle() {
   open.value = !open.value;
+  contextPoint.value = null;
   filter.value = "";
   if (open.value) {
     await nextTick();
@@ -43,8 +53,19 @@ async function toggle() {
   }
 }
 
+async function openAt(x: number, y: number) {
+  contextPoint.value = { x, y };
+  open.value = true;
+  filter.value = "";
+  await nextTick();
+  place();
+  await nextTick();
+  popup.value?.querySelector<HTMLElement>("input, button:not(:disabled)")?.focus({ preventScroll: true });
+}
+
 function choose(id: string) {
   open.value = false;
+  contextPoint.value = null;
   trigger.value?.focus({ preventScroll: true });
   emit("select", id);
 }
@@ -75,7 +96,8 @@ function onOutsidePointerDown(event: PointerEvent) {
 }
 
 const popup = ref<HTMLElement | null>(null);
-const close = () => { open.value = false; };
+const close = () => { open.value = false; contextPoint.value = null; };
+defineExpose({ openAt, close });
 function onScroll(event: Event) {
   if (event.target instanceof Node && popup.value?.contains(event.target)) return;
   close();
@@ -98,7 +120,7 @@ onUnmounted(() => {
     <button
       ref="trigger"
       type="button"
-      class="rounded px-1 py-0.5 text-xs leading-none text-neutral-400 opacity-0 transition-opacity hover:bg-neutral-200 hover:text-neutral-700 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-600 dark:hover:text-neutral-200"
+      class="inline-flex h-6 w-6 items-center justify-center rounded text-sm leading-none text-neutral-400 opacity-0 transition-colors transition-opacity hover:bg-neutral-200 hover:text-neutral-700 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-600 dark:hover:text-neutral-200"
       :class="{ 'opacity-100': open }"
       :aria-label="label"
       :title="label"
@@ -131,7 +153,11 @@ onUnmounted(() => {
           role="menuitem"
           :disabled="item.disabled"
           class="block w-full rounded px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-40"
-          :class="item.disabled ? '' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'"
+          :class="[
+            item.disabled ? '' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700',
+            item.danger ? 'text-red-600 dark:text-red-400' : '',
+            item.separatorBefore ? 'mt-1 border-t border-neutral-200 pt-2 dark:border-neutral-600' : '',
+          ]"
           @click="choose(item.id)"
         >{{ item.label }}</button>
         <p v-if="filterable && visible.length === 0" class="px-2 py-1.5 text-xs text-neutral-400">—</p>

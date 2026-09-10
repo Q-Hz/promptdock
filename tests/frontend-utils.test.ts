@@ -8,6 +8,7 @@ import {
   type Prompt,
 } from "../src/lib/api.ts";
 import { setLanguage, t, translateApiError } from "../src/lib/i18n.ts";
+import { isDeveloperToolsShortcut } from "../src/lib/webview-guards.ts";
 
 const prompts: Prompt[] = [
   {
@@ -108,4 +109,21 @@ test("autostart failures keep the platform-neutral backend detail", () => {
     translateApiError("settings.autostart_failed:permission denied"),
     "无法更新登录自启动设置：permission denied"
   );
+});
+
+test("developer tools shortcuts are blocked without swallowing normal app shortcuts", () => {
+  const chord = (key: string, modifiers: Partial<Record<"ctrlKey" | "shiftKey" | "altKey" | "metaKey", boolean>> = {}) => ({
+    key,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    metaKey: false,
+    ...modifiers,
+  });
+
+  assert.equal(isDeveloperToolsShortcut(chord("F12")), true);
+  assert.equal(isDeveloperToolsShortcut(chord("i", { ctrlKey: true, shiftKey: true })), true);
+  assert.equal(isDeveloperToolsShortcut(chord("I", { metaKey: true, altKey: true })), true);
+  assert.equal(isDeveloperToolsShortcut(chord("r", { ctrlKey: true })), false);
+  assert.equal(isDeveloperToolsShortcut(chord("F11")), false);
 });

@@ -23,6 +23,7 @@
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "visible": false,
+        "devtools": false,
         "center": true,
         "url": "index.html"
       },
@@ -35,6 +36,7 @@
         "minWidth": 860,
         "minHeight": 560,
         "visible": false,
+        "devtools": false,
         "url": "index.html?window=manager"
       }
     ],

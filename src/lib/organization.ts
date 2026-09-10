@@ -44,7 +44,8 @@ export function orderMembers(members: Prompt[], saved: string[] | undefined): Pr
   return [...ordered, ...rest];
 }
 
-// 管理器左侧的文件夹分组：只包含有成员的文件夹，空文件夹沿用偏好但不显示
+// 管理器左侧的文件夹分组：folderOrder 中的普通文件夹即使没有成员也显示；
+// 未分类只有在确有成员时显示。
 export function arrangeFolders(prompts: Prompt[], organization: Organization): FolderGroup[] {
   const byFolder = new Map<string, Prompt[]>();
   for (const prompt of prompts) {
@@ -56,8 +57,8 @@ export function arrangeFolders(prompts: Prompt[], organization: Organization): F
   const groups: FolderGroup[] = [];
   const used = new Set<string>();
   const push = (folder: string) => {
-    const members = byFolder.get(folder);
-    if (!members) return;
+    const members = byFolder.get(folder) ?? [];
+    if (folder === "" && members.length === 0) return;
     groups.push({
       key: folder,
       items: orderMembers(members, organization.promptOrderByFolder[folder]),
@@ -67,7 +68,7 @@ export function arrangeFolders(prompts: Prompt[], organization: Organization): F
   for (const folder of organization.folderOrder) {
     if (used.has(folder)) continue;
     const members = byFolder.get(folder);
-    if (!members || members.length === 0) continue;
+    if (folder === "" && (!members || members.length === 0)) continue;
     used.add(folder);
     push(folder);
   }

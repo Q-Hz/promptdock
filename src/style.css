@@ -12,5 +12,179 @@ body {
 }
 
 .dark body {
-  @apply bg-neutral-900 text-neutral-100;
+  color: #edf1f7;
+  background: #11151c;
+}
+
+/* 设置页的深蓝黑色板延伸到管理器与调用器；浅色主题保持原样。 */
+.dark [data-manager-shell],
+.dark [data-launcher-shell] {
+  color: #edf1f7;
+  color-scheme: dark;
+}
+
+.dark [data-manager-shell] {
+  background: #171a21;
+}
+
+.dark [data-manager-header] {
+  background: #191d25;
+  border-color: #2d3340;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.dark [data-manager-header] h1 {
+  color: #f4f7fb;
+  letter-spacing: -0.015em;
+}
+
+.dark [data-manager-secondary-button] {
+  color: #cbd3df;
+  background: #20252f;
+  border-color: #353d4b;
+}
+
+.dark [data-manager-secondary-button]:hover {
+  color: #edf1f7;
+  background: #292f3b;
+  border-color: #4b5669;
+}
+
+.dark [data-manager-sidebar] {
+  background: #151920;
+  box-shadow: inset -1px 0 #2d3340;
+}
+
+.dark [data-manager-editor] {
+  background: #191d25;
+}
+
+.dark [data-manager-search],
+.dark [data-manager-field] {
+  color: #edf1f7;
+  background: #1d212a;
+  border-color: #3a4251;
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.018);
+}
+
+.dark [data-manager-search]::placeholder,
+.dark [data-manager-field]::placeholder,
+.dark [data-launcher-shell] input::placeholder,
+.dark [data-launcher-shell] textarea::placeholder {
+  color: #737d90;
+}
+
+.dark [data-manager-search]:focus,
+.dark [data-manager-field]:focus {
+  border-color: #70a0ff;
+  box-shadow: 0 0 0 3px rgba(65, 113, 210, 0.16);
+}
+
+.dark [data-manager-field].border-red-400,
+.dark [data-manager-field].border-red-500 {
+  border-color: #f87171;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class~="dark:bg-neutral-800"] {
+  background-color: #1d212a;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class~="dark:bg-neutral-700"] {
+  background-color: #252a35;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class*="dark:hover:bg-neutral-700"]:hover {
+  background-color: #252a35;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class*="dark:hover:bg-neutral-600"]:hover {
+  background-color: #303744;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class~="dark:border-neutral-700"] {
+  border-color: #2d3340;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class~="dark:border-neutral-600"] {
+  border-color: #3a4251;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class~="dark:text-neutral-400"] {
+  color: #a5adbd;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) [class~="dark:text-neutral-500"] {
+  color: #737d90;
+}
+
+.dark [data-launcher-shell] {
+  background: #171a21;
+  border-color: #343b49;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.48), 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+
+.dark [data-launcher-drag] {
+  background: #14181f;
+  border-color: #2d3340;
+}
+
+.dark [data-launcher-drag] span {
+  background: #525c6d;
+}
+
+.dark [data-launcher-searchbar] {
+  background: #1b1f28;
+  border-color: #2d3340;
+}
+
+.dark [data-launcher-searchbar]:focus-within {
+  box-shadow: inset 3px 0 #70a0ff;
+}
+
+.dark [data-launcher-list] {
+  background: #171a21;
+}
+
+.dark [data-launcher-item] {
+  color: #d9dfe9;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.dark [data-launcher-item][data-active="true"] {
+  color: #fff;
+  background: #315fbd;
+  box-shadow: inset 0 0 0 1px rgba(148, 184, 255, 0.18);
+}
+
+.dark [data-launcher-content] {
+  background: #171a21;
+}
+
+.dark [data-launcher-content] textarea,
+.dark [data-launcher-content] input[type="text"] {
+  color: #edf1f7;
+  background: #1d212a;
+  border-color: #3a4251;
+}
+
+.dark [data-launcher-content] textarea:focus,
+.dark [data-launcher-content] input[type="text"]:focus {
+  border-color: #70a0ff;
+  box-shadow: 0 0 0 3px rgba(65, 113, 210, 0.16);
+}
+
+.dark [data-launcher-hint] {
+  color: #737d90;
+  background: #14181f;
+  border-color: #2d3340;
+}
+
+.dark :is([data-manager-shell], [data-launcher-shell]) * {
+  scrollbar-color: #3a4251 transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dark [data-launcher-item] {
+    transition: none;
+  }
 }

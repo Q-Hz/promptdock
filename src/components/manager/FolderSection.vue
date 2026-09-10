@@ -24,6 +24,11 @@ const props = defineProps<{
   shown: number;
   navHeight: number;
   folderOptions: string[];
+  folderOrderKeys: string[];
+  renaming?: boolean;
+  renameValue?: string;
+  renameError?: string;
+  folderBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -32,14 +37,20 @@ const emit = defineEmits<{
   showMore: [];
   collapseList: [];
   drop: [target: DropTarget];
-  folderAction: [action: "up" | "down"];
-  promptAction: [prompt: Prompt, action: "favorite" | "pin" | "up" | "down" | "end", sectionKey: string];
+  folderAction: [action: "up" | "down" | "rename" | "delete"];
+  updateRename: [value: string];
+  commitRename: [];
+  cancelRename: [];
+  promptAction: [prompt: Prompt, action: "favorite" | "pin" | "up" | "down" | "end" | "delete", sectionKey: string];
   movePromptTo: [prompt: Prompt, folder: string];
 }>();
 
 const viewport = ref<HTMLElement | null>(null);
 const section = ref<HTMLElement | null>(null);
 const pickerElement = ref<HTMLElement | null>(null);
+const folderMenu = ref<InstanceType<typeof ActionMenu> | null>(null);
+const promptMenus = new Map<string, InstanceType<typeof ActionMenu>>();
+const renameInput = ref<HTMLInputElement | null>(null);
 const rowIndicator = ref<{ id: string; position: DropPosition } | null>(null);
 const headerIndicator = ref<DropPosition | "end" | null>(null);
 const tempExpanded = ref(false);
@@ -48,6 +59,7 @@ const pickerFilter = ref("");
 let hoverTimer: number | undefined;
 
 const isPinnedSection = computed(() => props.variant === "pinned");
+const isSystemSection = computed(() => isPinnedSection.value || props.sectionKey === "");
 
 // 拖动排序在非空搜索时禁用，避免在不完整列表上误排（PRD 4.3）
 const sortable = computed(() => !props.searching);
@@ -76,12 +88,70 @@ const countLabel = computed(() =>
 );
 
 const folderMenuItems = computed(() => [
-  { id: "up", label: t("moveUp") },
-  { id: "down", label: t("moveDown") },
+  {
+    id: "up",
+    label: t("moveUp"),
+    disabled: !sortable.value || props.folderOrderKeys.indexOf(props.sectionKey) <= 0,
+  },
+  {
+    id: "down",
+    label: t("moveDown"),
+    disabled: !sortable.value || props.folderOrderKeys.indexOf(props.sectionKey) >= props.folderOrderKeys.length - 1,
+  },
+  { id: "rename", label: t("renameFolder") },
+  { id: "delete", label: t("deleteFolder"), danger: true },
 ]);
 
-function promptMenuItems(prompt: Prompt) {
-  const items = [
+watch(() => props.renaming, async (renaming) => {
+  if (!renaming) return;
+  await nextTick();
+  renameInput.value?.focus({ preventScroll: true });
+  renameInput.value?.select();
+});
+
+watch(() => props.renameError, async (error) => {
+  if (!props.renaming || !error) return;
+  await nextTick();
+  renameInput.value?.focus({ preventScroll: true });
+});
+
+function onFolderMenu(action: string) {
+  emit("folderAction", action as "up" | "down" | "rename" | "delete");
+}
+
+function onHeaderContextMenu(event: MouseEvent) {
+  if (isSystemSection.value || props.renaming) return;
+  event.preventDefault();
+  folderMenu.value?.openAt(event.clientX, event.clientY);
+}
+
+function onFolderTitleKeydown(event: KeyboardEvent) {
+  if (event.key !== "F2" || isSystemSection.value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  emit("folderAction", "rename");
+}
+
+function setPromptMenuRef(id: string, value: unknown) {
+  if (value) promptMenus.set(id, value as InstanceType<typeof ActionMenu>);
+  else promptMenus.delete(id);
+}
+
+function onPromptContextMenu(event: MouseEvent, prompt: Prompt) {
+  event.preventDefault();
+  promptMenus.get(prompt.id)?.openAt(event.clientX, event.clientY);
+}
+
+type MenuItem = {
+  id: string;
+  label: string;
+  disabled?: boolean;
+  danger?: boolean;
+  separatorBefore?: boolean;
+};
+
+function promptMenuItems(prompt: Prompt): MenuItem[] {
+  const items: MenuItem[] = [
     { id: "favorite", label: prompt.favorite ? t("unfavorite") : t("favorite") },
     { id: "pin", label: prompt.pinned ? t("unpin") : t("pin") },
     { id: "up", label: t("moveUp"), disabled: !sortable.value },
@@ -89,13 +159,14 @@ function promptMenuItems(prompt: Prompt) {
   ];
   if (!isPinnedSection.value) items.push({ id: "end", label: t("moveToFolderEnd"), disabled: false });
   items.push({ id: "move", label: t("moveToFolder"), disabled: false });
+  items.push({ id: "delete", label: t("deletePromptAction"), danger: true, separatorBefore: true });
   return items;
 }
 
 const pickerFolders = computed(() => {
   const query = pickerFilter.value.trim().toLowerCase();
   const options = [
-    { key: "", label: t("uncategorized") },
+    { key: "", label: t("uncategorizedSystem") },
     ...props.folderOptions.map((folder) => ({ key: folder, label: folder })),
   ];
   return query ? options.filter((option) => option.label.toLowerCase().includes(query)) : options;
@@ -106,7 +177,7 @@ function onPromptMenu(prompt: Prompt, action: string) {
     openPicker(prompt);
     return;
   }
-  emit("promptAction", prompt, action as "favorite" | "pin" | "up" | "down" | "end", props.sectionKey);
+  emit("promptAction", prompt, action as "favorite" | "pin" | "up" | "down" | "end" | "delete", props.sectionKey);
 }
 
 async function openPicker(prompt: Prompt) {
@@ -319,13 +390,17 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
       @dragenter="onHeaderDragOver"
       @dragleave="onHeaderDragLeave"
       @drop="onHeaderDrop"
+      @contextmenu="onHeaderContextMenu"
     >
       <button
+        v-if="!renaming"
+        data-folder-title
         type="button"
         class="flex min-w-0 flex-1 items-center gap-1 text-left"
         :aria-expanded="expanded"
         :aria-label="`${t('toggleFolder')}: ${title}`"
         @click="emit('toggleCollapsed')"
+        @keydown="onFolderTitleKeydown"
       >
         <span class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-base leading-none text-neutral-400" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
         <span class="truncate text-[12px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400" :title="title">
@@ -333,11 +408,32 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
         </span>
         <span class="ml-auto shrink-0 text-[10px] tabular-nums text-neutral-400">{{ countLabel }}</span>
       </button>
+      <div v-else class="flex min-w-0 flex-1 items-center gap-1">
+        <span class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-base leading-none text-neutral-400" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+        <div class="min-w-0 flex-1">
+          <input
+            ref="renameInput"
+            :value="renameValue"
+            :aria-label="t('renameFolderInput')"
+            :aria-invalid="renameError ? 'true' : undefined"
+            :aria-describedby="renameError ? `folder-rename-error-${sectionKey}` : undefined"
+            :disabled="folderBusy"
+            class="w-full rounded border bg-white px-1.5 py-1 text-xs font-medium outline-none focus:border-blue-500 dark:bg-neutral-800"
+            :class="renameError ? 'border-red-500' : 'border-blue-400 dark:border-blue-500'"
+            @input="emit('updateRename', ($event.target as HTMLInputElement).value)"
+            @keydown.enter.prevent="emit('commitRename')"
+            @keydown.esc.stop.prevent="emit('cancelRename')"
+            @blur="emit('commitRename')"
+          />
+          <p v-if="renameError" :id="`folder-rename-error-${sectionKey}`" class="mt-0.5 text-[13px] leading-tight text-red-500">{{ renameError }}</p>
+        </div>
+      </div>
 
-      <span class="flex w-9 shrink-0 items-center justify-end gap-1">
-        <template v-if="!isPinnedSection">
+      <span class="flex w-14 shrink-0 items-center justify-end gap-1">
+        <template v-if="!isPinnedSection && !renaming">
           <span
-            class="cursor-grab shrink-0 px-0.5 text-[11px] text-neutral-300 opacity-0 transition-opacity group-hover:opacity-100 dark:text-neutral-500"
+            data-folder-drag-handle
+            class="inline-flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-[11px] text-neutral-300 opacity-0 transition-colors transition-opacity hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-100 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
             :draggable="sortable"
             :title="t('dragFolderHandle')"
             :aria-label="t('dragFolderHandle')"
@@ -347,9 +443,17 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
             @dragend="clearTempExpand(); headerIndicator = null; endDrag()"
           >⠿</span>
           <ActionMenu
+            v-if="!isSystemSection"
+            ref="folderMenu"
             :label="t('folderActions')"
             :items="folderMenuItems"
-            @select="(action) => emit('folderAction', action as 'up' | 'down')"
+            @select="onFolderMenu"
+          />
+          <ActionMenu
+            v-else
+            :label="t('folderActions')"
+            :items="folderMenuItems.slice(0, 2)"
+            @select="onFolderMenu"
           />
         </template>
       </span>
@@ -364,22 +468,15 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
       >
         <template v-for="prompt in visibleItems" :key="prompt.id">
           <div
-            class="group flex items-center gap-1 rounded-md pr-1"
+            class="group flex items-center gap-1 rounded-md pl-5 pr-1"
             :style="{ boxShadow: rowIndicator?.id === prompt.id ? (rowIndicator.position === 'before' ? 'inset 0 2px #3b82f6' : 'inset 0 -2px #3b82f6') : undefined }"
             :class="prompt.id === selectedId ? 'bg-blue-500 text-white' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'"
-            :draggable="sortable"
             :data-prompt-id="prompt.id"
-            @dragstart="onRowDragStart($event, prompt)"
-            @dragend="onRowDragEnd"
             @dragover="onRowDragOver($event, prompt)"
             @dragenter="onRowDragOver($event, prompt)"
             @drop="onRowDrop($event, prompt)"
+            @contextmenu="onPromptContextMenu($event, prompt)"
           >
-            <span
-              class="shrink-0 cursor-grab px-1 text-[11px] opacity-30 group-hover:opacity-70"
-              :title="sortable ? t('dragPromptHandle') : t('searchSortDisabled')"
-              aria-hidden="true"
-            >⠿</span>
             <button
               type="button"
               class="flex min-w-0 flex-1 items-center gap-1.5 py-1.5 text-left text-sm"
@@ -391,10 +488,22 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
               <span v-if="prompt.pinned && !isPinnedSection" class="shrink-0" :aria-label="t('pinned')">📌</span>
               <span class="truncate">{{ prompt.title }}</span>
               <span class="ml-auto shrink-0 max-w-[90px] truncate text-[11px] opacity-60">
-                {{ isPinnedSection ? (prompt.folder || t("uncategorized")) : prompt.tags.join("·") }}
+                {{ isPinnedSection ? (prompt.folder || t("uncategorizedSystem")) : prompt.tags.join("·") }}
               </span>
             </button>
+            <span
+              data-prompt-drag-handle
+              class="inline-flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-[11px] opacity-0 transition-colors transition-opacity hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-70 group-focus-within:opacity-70 dark:hover:bg-neutral-600 dark:hover:text-neutral-200"
+              :draggable="sortable"
+              :title="sortable ? t('dragPromptHandle') : t('searchSortDisabled')"
+              :aria-label="sortable ? t('dragPromptHandle') : t('searchSortDisabled')"
+              role="button"
+              tabindex="-1"
+              @dragstart.stop="onRowDragStart($event, prompt)"
+              @dragend.stop="onRowDragEnd"
+            >⠿</span>
             <ActionMenu
+              :ref="(value) => setPromptMenuRef(prompt.id, value)"
               :label="t('promptActions')"
               :items="promptMenuItems(prompt)"
               @select="(action) => onPromptMenu(prompt, action)"

@@ -30,6 +30,12 @@ export interface PromptUpdate {
   organization: Organization;
 }
 
+export interface FolderUpdate {
+  folder: string;
+  prompts: Prompt[];
+  organization: Organization;
+}
+
 export interface Settings {
   hotkey: string;
   autostart: boolean;
@@ -39,6 +45,12 @@ export interface Settings {
   newlineKey: string;
   backKey: string;
   autoCheckUpdate: boolean;
+}
+
+export interface OnboardingStatus {
+  shouldShow: boolean;
+  hotkeyDisplay: string;
+  hotkeyAvailable: boolean;
 }
 
 export interface UpdateInfo {
@@ -110,12 +122,20 @@ export const api = {
   // index 为 null 时追加到目标文件夹真实成员末尾（含未显示条目之后）
   movePrompt: (id: string, toFolder: string, index: number | null, expected: Organization): Promise<PromptUpdate> =>
     invoke("move_prompt", { id, toFolder, index, expected }),
+  createFolder: (name: string, expected: Organization): Promise<FolderUpdate> =>
+    invoke("create_folder", { name, expected }),
+  renameFolder: (oldName: string, newName: string, expected: Organization): Promise<FolderUpdate> =>
+    invoke("rename_folder", { oldName, newName, expected }),
+  deleteFolder: (name: string, expected: Organization): Promise<FolderUpdate> =>
+    invoke("delete_folder", { name, expected }),
   getUiPrefs: (key: string): Promise<string> => invoke("get_ui_prefs", { key }),
   setUiPrefs: (key: string, value: string): Promise<void> =>
     invoke("set_ui_prefs", { key, value }),
   copyText: (text: string): Promise<void> => invoke("copy_text", { text }),
   getSettings: (): Promise<Settings> => invoke("get_settings"),
   setSettings: (s: Settings): Promise<void> => invoke("set_settings", { settings: s }),
+  getOnboardingStatus: (): Promise<OnboardingStatus> => invoke("get_onboarding_status"),
+  completeOnboarding: (): Promise<void> => invoke("complete_onboarding"),
   hideMain: (): Promise<void> => invoke("hide_main"),
   openManager: (): Promise<void> => invoke("open_manager"),
   exportPrompts: (path: string): Promise<void> => invoke("export_prompts", { path }),

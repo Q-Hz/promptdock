@@ -75,6 +75,9 @@ window.alert = (message) => { state.alerts.push(String(message)); };
         return { prompts: clone(records), organization: organizationOf(records) };
       case "get_ui_prefs": return "";
       case "set_ui_prefs": return;
+      case "get_onboarding_status":
+        return { shouldShow: false, hotkeyDisplay: "Ctrl+Shift+Space", hotkeyAvailable: true };
+      case "complete_onboarding": return;
       case "import_prompts":
         records = clone(incoming);
         return { count: records.length, organizationAdjusted: query.get("warnings") === "1" };

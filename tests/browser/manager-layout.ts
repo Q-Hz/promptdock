@@ -4,7 +4,7 @@
 // window.managerFixture exposes the recorded calls and reset/seed helpers for browser checks.
 import { createApp } from "vue";
 import ManagerApp from "../../src/components/ManagerApp.vue";
-import type { Library, Organization, Prompt, PromptUpdate } from "../../src/lib/api";
+import type { FolderUpdate, Library, Organization, Prompt, PromptUpdate } from "../../src/lib/api";
 import { setLanguage } from "../../src/lib/i18n";
 import "../../src/style.css";
 
@@ -81,6 +81,7 @@ function seedOrganization(records: Prompt[]): Organization {
     if (!folderOrder.includes(record.folder)) folderOrder.push(record.folder);
     (promptOrderByFolder[record.folder] ??= []).push(record.id);
   }
+  folderOrder.push("Empty folder");
   return {
     folderOrder,
     promptOrderByFolder,
@@ -101,6 +102,17 @@ const initial = readStore(DATA_KEY, () => ({ records: seedRecords(), organizatio
 let records: Prompt[] = initial.records;
 let organization: Organization = initial.organization ?? seedOrganization(records);
 let prefs: Record<string, string> = readStore(PREFS_KEY, () => ({}));
+let onboardingCompleted = query.get("onboarding") !== "1";
+const fixtureSettings = {
+  hotkey: "cmdorctrl+shift+space",
+  autostart: false,
+  theme: query.get("theme") === "dark" ? "dark" : "light",
+  language: query.get("lang") === "en" ? "en" : "zh",
+  advanceKey: "enter",
+  newlineKey: "shift+enter",
+  backKey: "escape",
+  autoCheckUpdate: false,
+};
 
 function persist() {
   localStorage.setItem(DATA_KEY, JSON.stringify({ records, organization }));
@@ -168,6 +180,7 @@ const state = {
   calls: [] as Array<{ command: string; args?: any }>,
   alerts: [] as string[],
   confirmed: [] as string[],
+  dialogAnswers: [] as boolean[],
 };
 const listeners = new Map<string, () => void>();
 
@@ -175,17 +188,25 @@ window.alert = (message) => { state.alerts.push(String(message)); };
 window.confirm = (message) => { state.confirmed.push(String(message)); return true; };
 
 (window as any).__TAURI__ = {
+  app: { getVersion: async () => "1.6.0-test" },
   event: {
     listen: async (name: string, callback: () => void) => {
       listeners.set(name, callback);
       return () => listeners.delete(name);
     },
   },
-  dialog: { open: async () => null, save: async () => null, ask: async () => false },
+  dialog: {
+    open: async () => null,
+    save: async () => null,
+    ask: async (message: string) => {
+      state.confirmed.push(String(message));
+      return state.dialogAnswers.shift() ?? false;
+    },
+  },
   core: {
     invoke: async (command: string, args?: any): Promise<unknown> => {
       state.calls.push({ command, args: args ? clone(args) : undefined });
-      if (["set_folder_order", "set_prompt_order", "set_pinned_order", "move_prompt"].includes(command)) {
+      if (["set_folder_order", "set_prompt_order", "set_pinned_order", "move_prompt", "create_folder", "rename_folder", "delete_folder"].includes(command)) {
         const canonical = (value: Organization) => JSON.stringify({
           folderOrder: value.folderOrder, pinnedOrder: value.pinnedOrder,
           members: Object.entries(value.promptOrderByFolder).sort(([a], [b]) => a.localeCompare(b)),
@@ -199,6 +220,11 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
         }
         case "get_ui_prefs": return prefs[args.key] ?? "";
         case "set_ui_prefs": prefs[args.key] = args.value; persistPrefs(); return;
+        case "get_onboarding_status":
+          return { shouldShow: !onboardingCompleted, hotkeyDisplay: "Ctrl+Shift+Space", hotkeyAvailable: true };
+        case "complete_onboarding": onboardingCompleted = true; return;
+        case "get_settings": return clone(fixtureSettings);
+        case "set_settings": return;
         case "set_manager_guard_ready":
         case "resolve_close":
         case "resolve_quit": return;
@@ -244,7 +270,7 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
           persist();
           return clone(normalized());
         case "move_prompt": {
-          if (args.toFolder && !records.some((item) => item.folder === args.toFolder)) throw "organization.stale";
+          if (args.toFolder && !normalized().folderOrder.includes(args.toFolder)) throw "organization.stale";
           const record = records.find((item) => item.id === args.id);
           if (!record) throw "prompt.not_found";
           const from = record.folder;
@@ -261,6 +287,45 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
           organization = current;
           persist();
           return clone({ prompt: record, organization: normalized() } satisfies PromptUpdate);
+        }
+        case "create_folder": {
+          const name = String(args.name).trim();
+          if (!name) throw "folder.empty";
+          if (organization.folderOrder.includes(name)) throw "folder.duplicate";
+          organization.folderOrder.push(name);
+          persist();
+          return clone({ folder: name, prompts: records, organization: normalized() } satisfies FolderUpdate);
+        }
+        case "rename_folder": {
+          const oldName = String(args.oldName);
+          const newName = String(args.newName).trim();
+          if (!organization.folderOrder.includes(oldName)) throw "folder.not_found";
+          if (newName !== oldName && organization.folderOrder.includes(newName)) throw "folder.duplicate";
+          organization.folderOrder = organization.folderOrder.map((folder) => folder === oldName ? newName : folder);
+          if (organization.promptOrderByFolder[oldName]) {
+            organization.promptOrderByFolder[newName] = organization.promptOrderByFolder[oldName];
+            delete organization.promptOrderByFolder[oldName];
+          }
+          records = records.map((record) => record.folder === oldName
+            ? { ...record, folder: newName, updatedAt: Date.now() }
+            : record);
+          persist();
+          return clone({ folder: newName, prompts: records, organization: normalized() } satisfies FolderUpdate);
+        }
+        case "delete_folder": {
+          const name = String(args.name);
+          if (!organization.folderOrder.includes(name) || !name) throw "folder.not_found";
+          const moved = organization.promptOrderByFolder[name] ?? [];
+          const uncategorized = organization.promptOrderByFolder[""] ?? [];
+          organization.promptOrderByFolder[""] = [...uncategorized, ...moved];
+          delete organization.promptOrderByFolder[name];
+          organization.folderOrder = organization.folderOrder.filter((folder) => folder !== name);
+          if (moved.length > 0 && !organization.folderOrder.includes("")) organization.folderOrder.push("");
+          records = records.map((record) => record.folder === name
+            ? { ...record, folder: "", updatedAt: Date.now() }
+            : record);
+          persist();
+          return clone({ folder: "", prompts: records, organization: normalized() } satisfies FolderUpdate);
         }
         case "save_prompt": {
           const incoming = clone(args.prompt) as Prompt;
@@ -310,6 +375,7 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
   organization: () => clone(normalized()),
   prefs: () => clone(prefs),
   callsFor: (command: string) => state.calls.filter((call) => call.command === command),
+  answerDialog: (answer: boolean) => { state.dialogAnswers.push(answer); },
   reset: () => {
     localStorage.removeItem(DATA_KEY);
     localStorage.removeItem(PREFS_KEY);

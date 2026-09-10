@@ -21,8 +21,10 @@ use tauri::{
 };
 
 pub struct DbState(pub Mutex<Connection>);
+pub struct HotkeyRegistrationState(pub AtomicBool);
 
 const DEFAULT_GLOBAL_HOTKEY: &str = "cmdorctrl+shift+space";
+const ONBOARDING_COMPLETED_KEY: &str = "onboarding_completed";
 
 // 所有读取 Prompt 的语句共用同一列顺序，row_to_prompt 依赖这些下标。
 pub(crate) const PROMPT_COLUMNS: &str =
@@ -60,6 +62,14 @@ pub struct PromptUpdate {
     pub organization: Organization,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderUpdate {
+    pub folder: String,
+    pub prompts: Vec<Prompt>,
+    pub organization: Organization,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -73,17 +83,37 @@ pub struct Settings {
     pub auto_check_update: bool,
 }
 
-fn init_db(app: &AppHandle) -> Connection {
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OnboardingStatus {
+    pub should_show: bool,
+    pub hotkey_display: String,
+    pub hotkey_available: bool,
+}
+
+fn init_db(app: &AppHandle) -> (Connection, bool) {
     let dir = app.path().app_data_dir().expect("无法获取数据目录");
     fs::create_dir_all(&dir).ok();
     let mut conn = Connection::open(dir.join("prompts.db")).expect("无法打开数据库");
-    initialize_db(&mut conn).expect("数据库初始化失败");
-    conn
+    let should_show_onboarding = initialize_db(&mut conn).expect("数据库初始化失败");
+    (conn, should_show_onboarding)
 }
 
 // 建表、旧库迁移、默认数据及顺序初始化必须作为一个整体提交。
-fn initialize_db(connection: &mut Connection) -> Result<(), String> {
+fn initialize_db(connection: &mut Connection) -> Result<bool, String> {
     let conn = connection.transaction().map_err(|e| e.to_string())?;
+    let had_user_tables = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let had_promptdock_schema = has_recognizable_promptdock_schema(&conn)?;
+    if had_user_tables && !had_promptdock_schema {
+        return Err("database.unrecognized_schema".into());
+    }
+    let had_folders_table = table_exists(&conn, "folders").map_err(|e| e.to_string())?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS prompts (
             id TEXT PRIMARY KEY,
@@ -109,6 +139,9 @@ fn initialize_db(connection: &mut Connection) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS ui_prefs (
             k TEXT PRIMARY KEY,
             v TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS folders (
+            name TEXT PRIMARY KEY
         );",
     )
     .map_err(|e| e.to_string())?;
@@ -123,8 +156,75 @@ fn initialize_db(connection: &mut Connection) -> Result<(), String> {
             insert_prompt(&conn, &p).map_err(|e| e.to_string())?;
         }
     }
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (k,v) VALUES (?1,?2)",
+        params![
+            ONBOARDING_COMPLETED_KEY,
+            if had_promptdock_schema { "1" } else { "0" }
+        ],
+    )
+    .map_err(|e| e.to_string())?;
     ensure_organization(&conn)?;
-    conn.commit().map_err(|e| e.to_string())
+    // 首次升级只物化当前仍被 Prompt 引用的普通文件夹；旧 organization 中的
+    // 无成员槽位不会进入 folders 表，因此不会变成幽灵空文件夹。
+    if !had_folders_table {
+        materialize_active_folders(&conn)?;
+        let prompts = read_prompts(&conn)?;
+        let folders = read_folders(&conn)?;
+        let mut organization = load_organization(&conn)?;
+        organization.normalize_with_folders(&prompts, &folders);
+        store_organization(&conn, &organization)?;
+    } else {
+        // 自修复被外部旧代码写入、但尚未登记的活跃文件夹。
+        materialize_active_folders(&conn)?;
+    }
+    let should_show_onboarding = !read_onboarding_completed(&conn)?;
+    conn.commit().map_err(|e| e.to_string())?;
+    Ok(should_show_onboarding)
+}
+
+fn has_recognizable_promptdock_schema(conn: &Connection) -> Result<bool, String> {
+    if !table_exists(conn, "prompts").map_err(|e| e.to_string())? {
+        return Ok(false);
+    }
+    let columns = conn
+        .prepare("SELECT name FROM pragma_table_info('prompts')")
+        .map_err(|e| e.to_string())?
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<std::collections::HashSet<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(["id", "title", "body", "created_at", "updated_at"]
+        .iter()
+        .all(|column| columns.contains(*column)))
+}
+
+fn read_onboarding_completed(conn: &Connection) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT v FROM settings WHERE k=?1",
+        [ONBOARDING_COMPLETED_KEY],
+        |row| row.get::<_, String>(0),
+    )
+    .optional()
+    .map(|value| value.as_deref() == Some("1"))
+    .map_err(|e| e.to_string())
+}
+
+fn write_onboarding_completed(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (k,v) VALUES (?1,'1')",
+        [ONBOARDING_COMPLETED_KEY],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+fn table_exists(conn: &Connection, name: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [name],
+        |row| row.get(0),
+    )
 }
 
 // 旧库升级必须幂等：只补缺失的列与顺序数据，不改动已有内容、收藏和历史。
@@ -194,6 +294,27 @@ pub(crate) fn read_prompts(conn: &Connection) -> Result<Vec<Prompt>, String> {
     Ok(list)
 }
 
+pub(crate) fn read_folders(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT name FROM folders ORDER BY rowid")
+        .map_err(|e| e.to_string())?;
+    let folders = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(folders)
+}
+
+fn materialize_active_folders(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO folders(name) SELECT DISTINCT folder FROM prompts WHERE folder <> ''",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 pub(crate) fn load_organization(conn: &Connection) -> Result<Organization, String> {
     let stored: String = conn
         .query_row("SELECT data FROM organization WHERE id = 1", [], |r| {
@@ -227,7 +348,7 @@ pub(crate) fn read_organization(
     prompts: &[Prompt],
 ) -> Result<Organization, String> {
     let mut organization = load_organization(conn)?;
-    organization.normalize(prompts);
+    organization.normalize_with_folders(prompts, &read_folders(conn)?);
     Ok(organization)
 }
 
@@ -322,6 +443,8 @@ fn save_prompt_impl(connection: &mut Connection, mut prompt: Prompt) -> Result<P
         prompt.last_used_at = stored.last_used_at;
         Some((stored.folder, stored.pinned))
     };
+    let previous_folder = previous.as_ref().map(|(folder, _)| folder.as_str());
+    prompt.folder = prepare_prompt_folder(&conn, &prompt.folder, previous_folder)?;
     if prompt.id.is_empty() {
         prompt.id = uuid::Uuid::new_v4().to_string();
         prompt.created_at = now;
@@ -343,7 +466,7 @@ fn save_prompt_impl(connection: &mut Connection, mut prompt: Prompt) -> Result<P
             }
         }
     }
-    organization.normalize(&prompts);
+    organization.normalize_with_folders(&prompts, &read_folders(&conn)?);
     store_organization(&conn, &organization)?;
     conn.commit().map_err(|e| e.to_string())?;
     Ok(prompt)
@@ -367,7 +490,7 @@ fn delete_prompt_impl(connection: &mut Connection, id: &str) -> Result<(), Strin
     let prompts = read_prompts(&conn)?;
     let mut organization = load_organization(&conn)?;
     organization.remove_prompt(&id, &folder);
-    organization.normalize(&prompts);
+    organization.normalize_with_folders(&prompts, &read_folders(&conn)?);
     store_organization(&conn, &organization)?;
     conn.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -425,7 +548,7 @@ fn set_pinned_impl(
     let prompts = read_prompts(&conn)?;
     let mut organization = load_organization(&conn)?;
     organization.set_pinned(&id, pinned);
-    organization.normalize(&prompts);
+    organization.normalize_with_folders(&prompts, &read_folders(&conn)?);
     store_organization(&conn, &organization)?;
     let prompt = prompts
         .into_iter()
@@ -457,7 +580,7 @@ fn write_order(
     let mut organization = read_organization(&tx, &prompts)?;
     require_current_organization(&organization, expected)?;
     apply(&mut organization);
-    organization.normalize(&prompts);
+    organization.normalize_with_folders(&prompts, &read_folders(&tx)?);
     store_organization(&tx, &organization)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(organization)
@@ -520,8 +643,8 @@ fn move_prompt_impl(
 ) -> Result<PromptUpdate, String> {
     let current = read_prompt_by_id(tx, id)?;
     let before = read_prompts(tx)?;
-    // 未分类始终可选；其它目标必须仍有真实成员，不能复活已经消失的文件夹。
-    if !to_folder.is_empty() && !before.iter().any(|p| p.folder == to_folder) {
+    // 未分类始终可选；普通目标以显式 folders 表为准，因此空文件夹也是合法落点。
+    if !to_folder.is_empty() && !folder_exists(tx, to_folder)? {
         return Err("organization.stale".into());
     }
     let target_len = before
@@ -539,7 +662,7 @@ fn move_prompt_impl(
     let prompts = read_prompts(tx)?;
     let mut organization = load_organization(tx)?;
     organization.move_prompt(id, &current.folder, to_folder, index);
-    organization.normalize(&prompts);
+    organization.normalize_with_folders(&prompts, &read_folders(tx)?);
     store_organization(tx, &organization)?;
     let prompt = prompts
         .into_iter()
@@ -574,6 +697,197 @@ fn move_prompt_checked(
     let current = read_organization(&tx, &read_prompts(&tx)?)?;
     require_current_organization(&current, expected)?;
     let update = move_prompt_impl(&tx, id, to_folder, index, chrono_now())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(update)
+}
+
+fn folder_exists(conn: &Connection, name: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM folders WHERE name=?1)",
+        [name],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn normalize_folder_name(name: &str) -> Result<String, String> {
+    if name.chars().any(char::is_control) {
+        return Err("folder.control_character".into());
+    }
+    let normalized = name.trim_matches(char::is_whitespace).to_string();
+    if normalized.is_empty() {
+        return Err("folder.empty".into());
+    }
+    if normalized.chars().count() > 50 {
+        return Err("folder.too_long".into());
+    }
+    Ok(normalized)
+}
+
+// 保存 Prompt 时，选择现有历史名称可以无损保留；只有新建归属才套用新名称规则。
+fn prepare_prompt_folder(
+    conn: &Connection,
+    input: &str,
+    previous: Option<&str>,
+) -> Result<String, String> {
+    if previous.is_some_and(|folder| folder == input) {
+        return Ok(input.to_string());
+    }
+    if input.is_empty() {
+        return Ok(String::new());
+    }
+    if input.chars().any(char::is_control) {
+        return Err("folder.control_character".into());
+    }
+    let normalized = input.trim_matches(char::is_whitespace).to_string();
+    if normalized.is_empty() {
+        return Ok(String::new());
+    }
+    if folder_exists(conn, &normalized)? {
+        return Ok(normalized);
+    }
+    let normalized = normalize_folder_name(&normalized)?;
+    conn.execute("INSERT INTO folders(name) VALUES (?1)", [&normalized])
+        .map_err(|e| e.to_string())?;
+    Ok(normalized)
+}
+
+fn folder_snapshot(conn: &Connection, folder: String) -> Result<FolderUpdate, String> {
+    let prompts = read_prompts(conn)?;
+    let organization = read_organization(conn, &prompts)?;
+    Ok(FolderUpdate {
+        folder,
+        prompts,
+        organization,
+    })
+}
+
+#[tauri::command]
+fn create_folder(
+    state: tauri::State<DbState>,
+    name: String,
+    expected: Organization,
+) -> Result<FolderUpdate, String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    create_folder_impl(&mut conn, &name, &expected)
+}
+
+fn create_folder_impl(
+    conn: &mut Connection,
+    name: &str,
+    expected: &Organization,
+) -> Result<FolderUpdate, String> {
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let prompts = read_prompts(&tx)?;
+    let current = read_organization(&tx, &prompts)?;
+    let name = normalize_folder_name(name)?;
+    if folder_exists(&tx, &name)? {
+        return Err("folder.duplicate".into());
+    }
+    require_current_organization(&current, expected)?;
+    tx.execute("INSERT INTO folders(name) VALUES (?1)", [&name])
+        .map_err(|e| e.to_string())?;
+    let mut organization = current;
+    organization.create_folder(&name);
+    organization.normalize_with_folders(&prompts, &read_folders(&tx)?);
+    store_organization(&tx, &organization)?;
+    let update = folder_snapshot(&tx, name)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(update)
+}
+
+#[tauri::command]
+fn rename_folder(
+    state: tauri::State<DbState>,
+    old_name: String,
+    new_name: String,
+    expected: Organization,
+) -> Result<FolderUpdate, String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    rename_folder_impl(&mut conn, &old_name, &new_name, &expected)
+}
+
+fn rename_folder_impl(
+    conn: &mut Connection,
+    old_name: &str,
+    new_name: &str,
+    expected: &Organization,
+) -> Result<FolderUpdate, String> {
+    if old_name.is_empty() {
+        return Err("folder.system".into());
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let prompts = read_prompts(&tx)?;
+    let current = read_organization(&tx, &prompts)?;
+    if !folder_exists(&tx, old_name)? {
+        return Err("folder.not_found".into());
+    }
+    let new_name = normalize_folder_name(new_name)?;
+    if new_name != old_name && folder_exists(&tx, &new_name)? {
+        return Err("folder.duplicate".into());
+    }
+    require_current_organization(&current, expected)?;
+    if new_name == old_name {
+        return folder_snapshot(&tx, new_name);
+    }
+    tx.execute(
+        "UPDATE folders SET name=?1 WHERE name=?2",
+        params![new_name, old_name],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE prompts SET folder=?1, updated_at=?2 WHERE folder=?3",
+        params![new_name, chrono_now(), old_name],
+    )
+    .map_err(|e| e.to_string())?;
+    let prompts = read_prompts(&tx)?;
+    let mut organization = current;
+    organization.rename_folder(&old_name, &new_name);
+    organization.normalize_with_folders(&prompts, &read_folders(&tx)?);
+    store_organization(&tx, &organization)?;
+    let update = folder_snapshot(&tx, new_name)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(update)
+}
+
+#[tauri::command]
+fn delete_folder(
+    state: tauri::State<DbState>,
+    name: String,
+    expected: Organization,
+) -> Result<FolderUpdate, String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    delete_folder_impl(&mut conn, &name, &expected)
+}
+
+fn delete_folder_impl(
+    conn: &mut Connection,
+    name: &str,
+    expected: &Organization,
+) -> Result<FolderUpdate, String> {
+    if name.is_empty() {
+        return Err("folder.system".into());
+    }
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    let prompts = read_prompts(&tx)?;
+    let current = read_organization(&tx, &prompts)?;
+    require_current_organization(&current, expected)?;
+    if !folder_exists(&tx, &name)? {
+        return Err("folder.not_found".into());
+    }
+    tx.execute(
+        "UPDATE prompts SET folder='', updated_at=?1 WHERE folder=?2",
+        params![chrono_now(), name],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM folders WHERE name=?1", [&name])
+        .map_err(|e| e.to_string())?;
+    let prompts = read_prompts(&tx)?;
+    let mut organization = current;
+    organization.delete_folder(&name);
+    organization.normalize_with_folders(&prompts, &read_folders(&tx)?);
+    store_organization(&tx, &organization)?;
+    let update = folder_snapshot(&tx, String::new())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(update)
 }
@@ -615,6 +929,39 @@ fn chrono_now() -> i64 {
 fn get_settings(state: tauri::State<DbState>) -> Result<Settings, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     Ok(read_settings(&conn))
+}
+
+#[tauri::command]
+fn get_onboarding_status(
+    state: tauri::State<DbState>,
+    hotkey_state: tauri::State<HotkeyRegistrationState>,
+) -> Result<OnboardingStatus, String> {
+    let conn = state.0.lock().map_err(|e| e.to_string())?;
+    let (hotkey, hotkey_available) = match conn
+        .query_row("SELECT v FROM settings WHERE k='hotkey'", [], |row| {
+            row.get::<_, String>(0)
+        })
+        .optional()
+    {
+        Ok(Some(value)) if !value.is_empty() => (value, true),
+        // 新安装尚未写入该设置行时，启动流程注册的就是平台默认快捷键。
+        Ok(_) => (DEFAULT_GLOBAL_HOTKEY.into(), true),
+        Err(_) => (DEFAULT_GLOBAL_HOTKEY.into(), false),
+    };
+    Ok(OnboardingStatus {
+        should_show: !read_onboarding_completed(&conn)?,
+        hotkey_display: format_hotkey_for_display(&hotkey, cfg!(target_os = "macos")),
+        // 当前启动流程只有在全局快捷键成功注册后才会进入管理器；这里额外区分读取失败。
+        hotkey_available: hotkey_available && hotkey_state.0.load(Ordering::SeqCst),
+    })
+}
+
+#[tauri::command]
+fn complete_onboarding(state: tauri::State<DbState>) -> Result<(), String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    write_onboarding_completed(&tx)?;
+    tx.commit().map_err(|e| e.to_string())
 }
 
 fn default_settings() -> Settings {
@@ -699,6 +1046,7 @@ fn read_settings(conn: &Connection) -> Settings {
 fn set_settings(
     app: AppHandle,
     state: tauri::State<DbState>,
+    hotkey_state: tauri::State<HotkeyRegistrationState>,
     settings: Settings,
 ) -> Result<(), String> {
     if !matches!(settings.theme.as_str(), "auto" | "light" | "dark") {
@@ -722,10 +1070,22 @@ fn set_settings(
         read_settings(&conn)
     };
 
-    replace_hotkey(&app, &previous.hotkey, &settings.hotkey)?;
+    let previous_hotkey_registered = hotkey_state.0.load(Ordering::SeqCst);
+    if previous_hotkey_registered {
+        replace_hotkey(&app, &previous.hotkey, &settings.hotkey)?;
+    } else {
+        register_hotkey(&app, &settings.hotkey)?;
+    }
+    hotkey_state.0.store(true, Ordering::SeqCst);
 
     if let Err(error) = apply_autostart(&app, settings.autostart) {
-        let _ = replace_hotkey(&app, &settings.hotkey, &previous.hotkey);
+        restore_previous_hotkey(
+            &app,
+            &hotkey_state,
+            previous_hotkey_registered,
+            &previous.hotkey,
+            &settings.hotkey,
+        );
         let _ = apply_autostart(&app, previous.autostart);
         return Err(format!("settings.autostart_failed:{error}"));
     }
@@ -759,7 +1119,13 @@ fn set_settings(
     })();
 
     if let Err(error) = save_result {
-        let _ = replace_hotkey(&app, &settings.hotkey, &previous.hotkey);
+        restore_previous_hotkey(
+            &app,
+            &hotkey_state,
+            previous_hotkey_registered,
+            &previous.hotkey,
+            &settings.hotkey,
+        );
         let _ = apply_autostart(&app, previous.autostart);
         return Err(error);
     }
@@ -769,6 +1135,27 @@ fn set_settings(
     app.emit("settings-changed", settings)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+fn restore_previous_hotkey(
+    app: &AppHandle,
+    state: &HotkeyRegistrationState,
+    previous_was_registered: bool,
+    previous_hotkey: &str,
+    attempted_hotkey: &str,
+) {
+    if previous_was_registered {
+        state.0.store(
+            replace_hotkey(app, attempted_hotkey, previous_hotkey).is_ok(),
+            Ordering::SeqCst,
+        );
+    } else {
+        use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+        if let Ok(shortcut) = Shortcut::try_from(attempted_hotkey) {
+            let _ = app.global_shortcut().unregister(shortcut);
+        }
+        state.0.store(false, Ordering::SeqCst);
+    }
 }
 
 fn register_hotkey(app: &AppHandle, hotkey: &str) -> Result<(), String> {
@@ -1046,12 +1433,14 @@ fn open_manager(app: AppHandle) {
             )
             .title(manager_title(&settings))
             .disable_drag_drop_handler()
+            .devtools(false)
             .theme(window_theme(&settings.theme))
             .inner_size(1080.0, 720.0)
             .min_inner_size(860.0, 560.0)
             .build();
         }
     }
+    let _ = app.emit("manager-opened", ());
 }
 
 #[tauri::command]
@@ -1098,19 +1487,63 @@ pub(crate) fn validate_import_document(
             }
         }
     }
-    let prompts: Vec<Prompt> = prompt_values
+    let mut prompts: Vec<Prompt> = prompt_values
         .iter()
         .cloned()
         .map(serde_json::from_value)
         .collect::<Result<_, _>>()
         .map_err(|_| "import.invalid_prompt".to_string())?;
-    if prompts.is_empty() {
+    for prompt in &mut prompts {
+        if prompt.folder.chars().any(char::is_control) {
+            return Err("import.invalid_folder".into());
+        }
+        prompt.folder = prompt.folder.trim_matches(char::is_whitespace).to_string();
+    }
+
+    let organization_value = data.get("organization");
+    if organization_value.is_some_and(|value| !value.is_object()) {
+        return Err("import.invalid_folders".into());
+    }
+    if let Some(folder_order) = organization_value.and_then(|value| value.get("folderOrder")) {
+        if !folder_order.is_array()
+            || folder_order
+                .as_array()
+                .is_some_and(|items| items.iter().any(|item| !item.is_string()))
+        {
+            return Err("import.invalid_folders".into());
+        }
+    }
+    let mut raw = organization::parse_raw_organization(organization_value);
+    if let Some(list) = raw.as_mut().and_then(|raw| raw.folder_order.as_mut()) {
+        let referenced = prompts
+            .iter()
+            .map(|prompt| prompt.folder.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let mut seen = std::collections::BTreeSet::new();
+        for folder in list.iter_mut() {
+            if folder.chars().any(char::is_control) {
+                return Err("import.invalid_folder".into());
+            }
+            *folder = folder.trim_matches(char::is_whitespace).to_string();
+            if (!folder.is_empty() && folder.chars().count() > 50)
+                && !referenced.contains(folder.as_str())
+            {
+                return Err("import.invalid_folder".into());
+            }
+            if !seen.insert(folder.clone()) {
+                return Err("import.duplicate_folder".into());
+            }
+        }
+    }
+    if prompts.is_empty()
+        && !raw
+            .as_ref()
+            .and_then(|raw| raw.folder_order.as_ref())
+            .is_some_and(|folders| folders.iter().any(|folder| !folder.is_empty()))
+    {
         return Err("import.no_prompts".into());
     }
-    Ok((
-        prompts,
-        organization::parse_raw_organization(data.get("organization")),
-    ))
+    Ok((prompts, raw))
 }
 
 #[tauri::command]
@@ -1128,11 +1561,21 @@ fn import_prompts(
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM prompts", [])
         .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM folders", [])
+        .map_err(|e| e.to_string())?;
     for p in &file.prompts {
         insert_prompt(&tx, p).map_err(|e| e.to_string())?;
     }
     // 覆盖导入整体采用文件内容与规范化后的顺序，与提示词记录同一事务提交（PRD 5.4.8）
     let organization = Organization::from_import(&file.prompts, file.organization.as_ref());
+    for folder in organization
+        .folder_order
+        .iter()
+        .filter(|folder| !folder.is_empty())
+    {
+        tx.execute("INSERT OR IGNORE INTO folders(name) VALUES (?1)", [folder])
+            .map_err(|e| e.to_string())?;
+    }
     store_organization(&tx, &organization)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
@@ -1455,11 +1898,16 @@ pub fn run() {
             set_prompt_order,
             set_pinned_order,
             move_prompt,
+            create_folder,
+            rename_folder,
+            delete_folder,
             get_ui_prefs,
             set_ui_prefs,
             copy_text,
             get_settings,
             set_settings,
+            get_onboarding_status,
+            complete_onboarding,
             hide_main,
             open_manager,
             export_prompts,
@@ -1475,12 +1923,13 @@ pub fn run() {
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();
-            let conn = init_db(&app_handle);
+            let (conn, should_show_onboarding) = init_db(&app_handle);
             app.manage(DbState(Mutex::new(conn)));
             app.manage(PendingUpdate(Mutex::new(None)));
             app.manage(CloseGate(Mutex::new(None)));
             app.manage(QuitGate(Mutex::new(None)));
             app.manage(ManagerGuardReady(AtomicBool::new(false)));
+            app.manage(HotkeyRegistrationState(AtomicBool::new(false)));
 
             let settings = get_settings_inner(&app_handle);
             let menu = build_tray_menu(&app_handle, &settings)?;
@@ -1510,7 +1959,11 @@ pub fn run() {
                 .build(app)?;
 
             set_manager_activation(&app_handle, false);
-            register_hotkey(&app_handle, &settings.hotkey)?;
+            let hotkey_registered = register_hotkey(&app_handle, &settings.hotkey).is_ok();
+            app_handle
+                .state::<HotkeyRegistrationState>()
+                .0
+                .store(hotkey_registered, Ordering::SeqCst);
             let _ = apply_autostart(&app_handle, settings.autostart);
             apply_window_preferences(&app_handle, &settings);
 
@@ -1533,6 +1986,9 @@ pub fn run() {
                     }
                     prompt_install_update(&handle, &info.version);
                 });
+            }
+            if should_show_onboarding {
+                open_manager(app_handle.clone());
             }
             Ok(())
         })
@@ -1648,6 +2104,52 @@ mod tests {
     }
 
     #[test]
+    fn import_accepts_empty_folder_only_files_and_rejects_invalid_folder_metadata() {
+        let mut empty = import_document(Some("promptdeck"), 1);
+        empty["prompts"] = serde_json::json!([]);
+        empty["organization"] = serde_json::json!({
+            "folderOrder": ["Empty"],
+            "promptOrderByFolder": {},
+            "pinnedOrder": [],
+        });
+        let (prompts, raw) = validate_import_document(&empty).unwrap();
+        assert!(prompts.is_empty());
+        assert_eq!(raw.unwrap().folder_order.unwrap(), vec!["Empty"]);
+
+        let mut invalid_type = empty.clone();
+        invalid_type["organization"]["folderOrder"] = serde_json::json!("Empty");
+        assert_eq!(
+            validate_import_document(&invalid_type).unwrap_err(),
+            "import.invalid_folders"
+        );
+
+        let mut duplicate = empty.clone();
+        duplicate["organization"]["folderOrder"] = serde_json::json!([" Notes ", "Notes"]);
+        assert_eq!(
+            validate_import_document(&duplicate).unwrap_err(),
+            "import.duplicate_folder"
+        );
+    }
+
+    #[test]
+    fn import_rejects_control_characters_but_preserves_long_legacy_folder_names() {
+        let mut invalid = import_document(Some("promptdeck"), 1);
+        invalid["prompts"][0]["folder"] = serde_json::json!("A\tB");
+        assert_eq!(
+            validate_import_document(&invalid).unwrap_err(),
+            "import.invalid_folder"
+        );
+
+        let long = "x".repeat(51);
+        let mut legacy = import_document(Some("promptdeck"), 1);
+        legacy["prompts"][0]["folder"] = serde_json::json!(long.clone());
+        legacy["organization"] = serde_json::json!({ "folderOrder": [long.clone()] });
+        let (prompts, raw) = validate_import_document(&legacy).unwrap();
+        assert_eq!(prompts[0].folder, long);
+        assert_eq!(raw.unwrap().folder_order.unwrap()[0], prompts[0].folder);
+    }
+
+    #[test]
     fn migration_adds_the_pinned_column_once_and_preserves_existing_rows() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(
@@ -1691,7 +2193,8 @@ mod tests {
                 use_count INTEGER NOT NULL DEFAULT 0, last_used_at INTEGER,
                 created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
             );
-            CREATE TABLE organization (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);",
+            CREATE TABLE organization (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);
+            CREATE TABLE folders (name TEXT PRIMARY KEY);",
         )
         .unwrap();
         // 旧排序规则下 B 在前：收藏优先，其后按最近使用
@@ -1806,13 +2309,18 @@ mod tests {
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
-            CREATE TABLE organization (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);",
+            CREATE TABLE organization (id INTEGER PRIMARY KEY CHECK (id = 1), data TEXT NOT NULL);
+            CREATE TABLE folders (name TEXT PRIMARY KEY);",
         )
         .unwrap();
         conn
     }
 
     fn seed_prompt(conn: &Connection, id: &str, folder: &str, pinned: bool) {
+        if !folder.is_empty() {
+            conn.execute("INSERT OR IGNORE INTO folders(name) VALUES (?1)", [folder])
+                .unwrap();
+        }
         insert_prompt(
             conn,
             &Prompt {

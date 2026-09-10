@@ -265,9 +265,10 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden rounded-xl border border-neutral-300 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-800" @keydown="onKeydown">
+  <div data-launcher-shell class="flex h-full flex-col overflow-hidden rounded-xl border border-neutral-300 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-800" @keydown="onKeydown">
     <div
       data-tauri-drag-region
+      data-launcher-drag
       class="flex h-5 shrink-0 cursor-move items-center justify-center border-b border-neutral-100 dark:border-neutral-700/70"
       :title="t('dragWindow')"
     >
@@ -275,7 +276,7 @@ function onKeydown(e: KeyboardEvent) {
     </div>
     <!-- 搜索阶段 -->
     <div v-if="stage === 'search'" class="flex min-h-0 flex-1 flex-col">
-      <div class="border-b border-neutral-200 p-3 dark:border-neutral-700">
+      <div data-launcher-searchbar class="border-b border-neutral-200 p-3 dark:border-neutral-700">
         <input
           id="launcher-input"
           v-model="query"
@@ -284,7 +285,7 @@ function onKeydown(e: KeyboardEvent) {
           autofocus
         />
       </div>
-      <div class="flex-1 overflow-y-auto p-1">
+      <div data-launcher-list class="flex-1 overflow-y-auto p-1">
         <div v-if="loading" class="p-4 text-center text-sm text-neutral-400">
           {{ t("promptLoading") }}
         </div>
@@ -298,6 +299,8 @@ function onKeydown(e: KeyboardEvent) {
           <button
             v-for="(p, i) in filtered"
             :key="p.id"
+            data-launcher-item
+            :data-active="i === selIndex ? 'true' : 'false'"
             tabindex="-1"
             class="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left"
             :class="i === selIndex ? 'bg-blue-500 text-white' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'"
@@ -318,14 +321,14 @@ function onKeydown(e: KeyboardEvent) {
           {{ t("noSearchResults") }}
         </div>
       </div>
-      <div class="border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-700">
+      <div data-launcher-hint class="border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-700">
         {{ searchKeyHint }}
       </div>
     </div>
 
     <!-- 变量填写阶段 -->
     <div v-else-if="stage === 'variables'" class="flex min-h-0 flex-1 flex-col">
-      <div class="flex-1 overflow-y-auto p-4">
+      <div data-launcher-content class="flex-1 overflow-y-auto p-4">
         <div class="mb-3 flex items-center justify-between">
           <h2 class="text-sm font-semibold">{{ selected?.title }}</h2>
           <span class="text-xs text-neutral-400">{{ t("variableCount", { count: vars.length }) }}</span>
@@ -401,14 +404,14 @@ function onKeydown(e: KeyboardEvent) {
           <button tabindex="-1" class="rounded-md bg-blue-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="generate">{{ t("generatePrompt") }}</button>
         </div>
       </div>
-      <div class="border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-700">
+      <div data-launcher-hint class="border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-700">
         {{ variablesKeyHint }}
       </div>
     </div>
 
     <!-- 结果编辑阶段 -->
     <div v-else class="flex min-h-0 flex-1 flex-col">
-      <div class="flex min-h-0 flex-1 flex-col p-4">
+      <div data-launcher-content class="flex min-h-0 flex-1 flex-col p-4">
         <textarea
           id="result-input"
           v-model="resultText"
@@ -427,7 +430,7 @@ function onKeydown(e: KeyboardEvent) {
           </button>
         </div>
       </div>
-      <div class="border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-700">
+      <div data-launcher-hint class="border-t border-neutral-200 px-3 py-1.5 text-[11px] text-neutral-400 dark:border-neutral-700">
         {{ resultKeyHint }}
       </div>
     </div>
