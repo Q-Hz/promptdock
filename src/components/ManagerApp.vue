@@ -12,7 +12,8 @@ import { LAYOUT_PREFS_KEY, defaultLayout, parseLayout, serializeLayout, type Man
 import { dragPayload, endDrag, type DropPosition, type DropTarget } from "../lib/drag-state";
 import { t, translateApiError } from "../lib/i18n";
 import { isDirty as computeDirty, snapshotFromPrompt, type EditorSnapshot } from "../lib/unsaved";
-import { openDiscardDialog, openUnsavedDialog } from "../lib/confirm-dialog";
+import { confirmDialog, openDiscardDialog, openUnsavedDialog } from "../lib/confirm-dialog";
+import { matchesKeybinding } from "../lib/keybindings";
 import SettingsModal from "./SettingsModal.vue";
 import InterfaceTour from "./InterfaceTour.vue";
 import VariableExamplesModal from "./VariableExamplesModal.vue";
@@ -922,7 +923,17 @@ async function requestDeletePrompt(prompt: Prompt) {
   const id = prompt.id;
   const deletingSelected = selectedId.value === id;
   const title = deletingSelected ? editing.value.title : prompt.title;
-  if (!confirm(t("deleteConfirm", { title }))) return;
+  const message = t("deleteConfirm", { title });
+  const dialog = (window as any).__TAURI__?.dialog;
+  const confirmed = dialog?.ask
+    ? await dialog.ask(message, {
+        title: t("delete"),
+        kind: "warning",
+        okLabel: t("delete"),
+        cancelLabel: t("cancel"),
+      })
+    : confirm(message);
+  if (!confirmed) return;
 
   const deleteAction = async () => {
     try {
@@ -1153,6 +1164,45 @@ async function resolveLeaveWithLayout(): Promise<boolean> {
 }
 
 async function handleWindowKeydown(event: KeyboardEvent) {
+  const shortcutBlocked = !managerReady.value
+    || !!importSession.value
+    || importing.value
+    || showSettings.value
+    || onboardingOpen.value
+    || showVariableExamples.value
+    || confirmDialog.open;
+
+  if (matchesKeybinding(event, "cmdorctrl+s")) {
+    event.preventDefault();
+    if (!shortcutBlocked) void performSave();
+    return;
+  }
+
+  if (!shortcutBlocked && !event.repeat && matchesKeybinding(event, "delete")) {
+    const target = event.target instanceof Element ? event.target : null;
+    const promptRow = target?.closest<HTMLElement>("[data-prompt-id]");
+    const promptId = promptRow?.dataset.promptId;
+    if (promptId && promptId === selectedId.value) {
+      const prompt = prompts.value.find((item) => item.id === promptId);
+      if (prompt) {
+        event.preventDefault();
+        event.stopPropagation();
+        void requestDeletePrompt(prompt);
+        return;
+      }
+    }
+
+    const folderTitle = target?.closest<HTMLElement>("[data-folder-title]");
+    const folderSection = folderTitle?.closest<HTMLElement>('[data-section-variant="folder"]');
+    const folder = folderSection?.dataset.sectionKey;
+    if (folder) {
+      event.preventDefault();
+      event.stopPropagation();
+      void requestDeleteFolder(folder);
+      return;
+    }
+  }
+
   const reloadShortcut = event.key === "F5" || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "r");
   if (!reloadShortcut) return;
   event.preventDefault();

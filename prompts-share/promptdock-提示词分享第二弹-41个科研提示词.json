@@ -1,5 +1,5 @@
 {
-  "exportedAt": 1788595421518,
+  "exportedAt": 1789053380879,
   "format": "promptdeck",
   "organization": {
     "folderOrder": [
@@ -86,21 +86,6 @@
     }
   },
   "prompts": [
-    {
-      "body": "请对以下提示词进行改写和标准化，使其更适合长期复用、分类和管理。\n\n### 原始提示词\n\n{{source_prompt}}\n\n### 备注\n\n{{note_language=[提示词用中文输出|提示词用英文输出]}}\n{{note}}\n\n请遵循以下要求：\n\n1. 生成标题\n   提炼一个简洁标题，长度控制在 3～8 个字，准确概括该提示词的核心用途。\n\n2. 生成 Tags\n   为提示词分配一个或多个合适的 Tags。优先从以下已有 Tags 中选择：\n   `writing | plotting | reading | Note organization | editing | planning | review`\n\n   如果已有 Tags 均不合适，可以创建新的 Tag。\n\n3. 生成 Folder\n   每条提示词只能归入一个 Folder。优先从以下已有 Folder 中选择：\n   `paper | Note organization | planning | editing`\n\n   如果已有 Folder 均不合适，可以创建新的 Folder。\n\n   注意区分 Folder 与 Tags 的层级：\n\n   * Folder 用于确定提示词的主要归属，只能有一个；\n   * Tags 用于描述提示词的用途、能力或特征，可以有多个；\n   * Folder 与 Tags 可以出现相同词汇，但两者承担不同的分类作用。\n\n4. 提取变量\n   分析原始提示词中适合复用或动态调整的内容，并使用双大括号 `{{}}` 将其变量化。\n\n   根据变量性质选择合适的形式，注意下列应该是双大括号，本处用单大括号代替：\n\n   * 普通变量：`{text}` \n   * 带默认值的变量：`{count=15}`\n   * 带可选值的变量：`{tone=[professional|casual|friendly|confident|empathetic]}`\n   * 多选变量：`{tags+=[React|Vue|Svelte]}`，勾选的值默认以逗号加空格连接，可用 `~` 指定连接符（支持 `\\n` 换行转义），如 `{lines+=[a|b|c]~\\n}`\n\n   只提取真正具有变化可能、且有助于提示词复用的内容。不要为了增加变量而变量化固定规则、核心任务逻辑或必要的质量要求。\n\n5. 改写提示词\n   在不改变原始任务目标和关键约束的前提下，对提示词进行必要的优化。\n\n   改写后的提示词不需要比原文更长或更复杂，重点是：\n\n   * 表意准确；\n   * 结构清晰；\n   * 便于复用；\n   * 变量设计合理；\n   * 不遗漏原提示词的重要要求。\n\n6. 处理备注\n   如果提供了 `备注`，需要根据备注进一步调整提示词。\n\n   当备注中的明确要求与一般改写规则存在冲突时，优先遵循备注中的明确要求，但不得破坏最终输出格式。\n\n请严格按照以下格式输出，不要添加额外说明（注意下列应该是双大括号，本处用单大括号代替）：\n\ntitle：{generated_title}\n\nTags (comma-separated)：{generated_tags}\n\nFolder：{generated_folder}\n\nPrompt body：\n\n{rewritten_prompt}\n",
-      "createdAt": 1788084293760,
-      "favorite": true,
-      "folder": "Note organization",
-      "id": "1717a59e-4dbf-4a21-b5c3-c1e55762cd8f",
-      "lastUsedAt": null,
-      "pinned": false,
-      "tags": [
-        "Note organization"
-      ],
-      "title": "提示词标准化",
-      "updatedAt": 1788275972463,
-      "useCount": 0
-    },
     {
       "body": "# 角色\n你是一位擅长从研究方法和实验结果中提炼论文贡献的资深学者。\n\n# 任务\n根据下面提供的方法与结果，提炼论文可以使用的 contribution。\n\n# 要求\n1. 提炼约 {{contribution_count=4}} 条贡献，每条只表达一个明确增量。\n2. 优先按“问题或 insight → 方法 → 工程或实验”层级排序，而不是平均罗列。\n3. 每条以明确动作或成果为核心，具体、可核验，避免“提出了一种有效方法”等空泛表述。\n4. 所有贡献必须得到输入材料支持，不得夸大；证据不足的 claim 单独标出供我确认。\n5. 分别给出会议版和期刊版：会议版更精炼，期刊版可适度展开。\n\n# 输出格式\n[会议版]\n{{contribution_count=4}} 条 contribution\n\n[期刊版]\n{{contribution_count=4}} 条 contribution\n\n[待确认]\n列出证据仍需确认的 claim；若没有则说明无。\n\n# 输入\n方法与主要结果：\n{{method_and_results}}",
       "createdAt": 1788277750097,
@@ -792,6 +777,21 @@
       ],
       "title": "创新性压力测试",
       "updatedAt": 1788279633308,
+      "useCount": 0
+    },
+    {
+      "body": "请对以下提示词进行改写和标准化，使其更适合长期复用、分类和管理。\n\n### 原始提示词\n\n{{source_prompt}}\n\n### 备注\n\n{{note_language=[提示词用中文输出|提示词用英文输出]}}\n{{note}}\n\n请遵循以下要求：\n\n## 1. 生成标题\n\n提炼一个简洁标题，长度控制在 3～8 个字，准确概括该提示词的核心用途。\n\n## 2. 生成 Tags\n\n为提示词分配一个或多个合适的 Tags。优先从以下已有 Tags 中选择：\n\n`writing | plotting | reading | Note organization | editing | planning | review`\n\n如果已有 Tags 均不合适，可以创建新的 Tag。\n\n## 3. 生成 Folder\n\n每条提示词只能归入一个 Folder。优先从以下已有 Folder 中选择：\n\n`paper | Note organization | planning | editing`\n\n如果已有 Folder 均不合适，可以创建新的 Folder。\n\n注意区分 Folder 与 Tags 的层级：\n\n* Folder 用于确定提示词的主要归属，只能有一个；\n* Tags 用于描述提示词的用途、能力或特征，可以有多个；\n* Folder 与 Tags 可以出现相同词汇，但两者承担不同的分类作用。\n\n## 4. 提取变量\n\n分析原始提示词中适合复用或动态调整的内容，并将其转换为 PromptDock 支持的变量格式。\n\n变量设计要求：\n\n* 只提取真正具有变化可能、且有助于提示词复用的内容；\n* 不要为了增加变量而变量化固定规则、核心任务逻辑或必要的质量要求；\n* 优先变量化用户每次调用时可能不同的输入内容；\n* 不要将提示词中的固定要求、执行步骤、评价标准等内容变量化；\n* 变量名称应该清晰表达其代表的输入内容类型。\n\n变量类型根据实际情况选择：\n\n* 普通变量；\n* 带默认值变量；\n* 带可选值变量；\n* 多选变量。\n\n变量格式必须符合 PromptDock 的变量语法要求。\n\n注意：以下示例中的变量符号使用单括号表示，实际生成时需要使用 PromptDock 支持的变量格式。\n\n* 普通变量：`{text}`\n* 带默认值变量：`{count=15}`\n* 带可选值变量：`{tone=[professional|casual|friendly|confident|empathetic]}`\n* 多选变量：`{tags+=[React|Vue|Svelte]}`\n\n多选变量默认使用逗号加空格连接，可使用 `~` 指定连接符，支持 `\\n` 换行转义。\n\n### 变量使用规则（重要）\n\n请严格区分：\n\n1. 当前任务中的变量：\n\n   当前标准化提示词自身使用变量，用于接收用户输入。\n\n2. 输出结果中的变量：\n\n   标准化后的 Prompt body 可能需要包含变量，用于未来调用该 Prompt 时接收动态输入。\n\n变量名称只是一个占位标识，不代表实际输入内容。\n\n生成 Prompt body 时必须遵守：\n\n* 变量应该放置在用户未来需要输入内容的位置；\n* 变量名称应该代表输入内容的类型，而不是具体内容；\n* 不要把变量名称作为句子中的实际内容使用；\n* 不要在 Prompt 中解释某个变量代表什么；\n* 不要假设变量名称本身就是用户提供的信息；\n* 替换变量后，最终 Prompt 必须保持语义自然。\n\n例如：\n\n正确逻辑：\n\n“请分析用户提供的论文内容。”\n\n其中“论文内容”对应的位置应设计为变量。\n\n错误逻辑：\n\n“请分析 {paper_text}，其中 paper_text 是论文内容。”\n\n因为变量名称不应该出现在最终提示词的解释文本中。\n\n变量替换后，用户最终使用 Prompt 时看到的应该是实际填写的内容，而不是变量名称。\n\n## 5. 改写提示词\n\n在不改变原始任务目标和关键约束的前提下，对提示词进行必要优化。\n\n改写后的提示词重点：\n\n* 表意准确；\n* 结构清晰；\n* 便于复用；\n* 变量设计合理；\n* 不遗漏原提示词的重要要求。\n\n不要为了显得完整而增加原始提示词中不存在的任务、限制或能力。\n\n如果原始提示词已经比较完善，只进行必要的结构优化，不要过度改写。\n\n## 6. 处理备注\n\n如果提供了备注，需要根据备注进一步调整提示词。\n\n当备注中的明确要求与一般改写规则存在冲突时，优先遵循备注中的明确要求，但不得破坏最终输出格式。\n\n请严格按照以下格式输出，不要添加额外说明：\n\ntitle：{generated_title}\n\nTags (comma-separated)：{generated_tags}\n\nFolder：{generated_folder}\n\nPrompt body：\n\n{rewritten_prompt}\n",
+      "createdAt": 1788084293760,
+      "favorite": true,
+      "folder": "Note organization",
+      "id": "1717a59e-4dbf-4a21-b5c3-c1e55762cd8f",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [
+        "Note organization"
+      ],
+      "title": "提示词标准化",
+      "updatedAt": 1789053374103,
       "useCount": 0
     }
   ],

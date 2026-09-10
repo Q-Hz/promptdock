@@ -47,8 +47,9 @@ function viewportOf(section) {
   return section.querySelector("div.overflow-y-auto[style*='max-height']");
 }
 
-async function pressKey(element, key, shift = false) {
-  element.dispatchEvent(new KeyboardEvent("keydown", { key, shiftKey: shift, bubbles: true, cancelable: true }));
+async function pressKey(element, key, modifiers = false) {
+  const options = typeof modifiers === "boolean" ? { shiftKey: modifiers } : modifiers;
+  element.dispatchEvent(new KeyboardEvent("keydown", { key, ...options, bubbles: true, cancelable: true }));
   await tick();
 }
 
@@ -1134,6 +1135,7 @@ export async function runPromptContextChecks() {
     .find((button) => button.textContent.trim() === '删除 Prompt…');
   check(deleteItem.className.includes('border-t') && getComputedStyle(deleteItem).color !== '',
     'delete is visually separated as the dangerous final action');
+  window.managerFixture.answerDialog(true);
   await clickMenuItem(menu, '删除 Prompt…');
   await until(() => !fixtureRecord('dup-2'), 'the context-menu deletion to commit');
   check(lastCall('delete_prompt')?.args.id === 'dup-2', 'context deletion targets the right-clicked prompt');
@@ -1143,6 +1145,59 @@ export async function runPromptContextChecks() {
     && document.querySelector('main input[placeholder="Prompt 标题"]').value === draftTitle,
     'deleting another prompt preserves the current editor draft and selection');
   return { group: 'prompt-context', assertions };
+}
+
+export async function runFixedShortcutChecks() {
+  let assertions = 0;
+  const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
+
+  const body = document.querySelector('main textarea');
+  const initiallySelectedRow = document.querySelector('[data-prompt-id].bg-blue-500');
+  const initiallySelectedId = initiallySelectedRow.dataset.promptId;
+  const savesBefore = saveCount();
+  await setText(body, 'Saved from Ctrl+S');
+  await pressKey(body, 's', { ctrlKey: true });
+  await until(() => fixtureRecord(initiallySelectedId)?.body === 'Saved from Ctrl+S', 'Ctrl+S to save the draft');
+  check(saveCount() === savesBefore + 1, 'Ctrl+S invokes the same save command once');
+
+  const duplicateRow = folderSection('DUPLICATES').querySelector('[data-prompt-id="dup-1"]');
+  duplicateRow.querySelector('button').click();
+  await until(() => document.querySelector('main input[placeholder="Prompt 标题"]').value === 'Same title',
+    'the shortcut delete prompt to load');
+  const selectedRow = folderSection('DUPLICATES').querySelector('[data-prompt-id="dup-1"]');
+  const selectedButton = selectedRow.querySelector('button');
+  selectedButton.focus();
+  const promptDialogs = window.managerFixture.state.dialogAsks.length;
+  window.managerFixture.answerDialog(false);
+  [...document.querySelectorAll('main button')]
+    .find((button) => button.textContent.trim() === '删除')
+    .click();
+  await tick();
+  check(!!fixtureRecord('dup-1'), 'cancelling the delete button warning keeps the selected prompt');
+  check(window.managerFixture.state.dialogAsks.length === promptDialogs + 1
+    && window.managerFixture.state.dialogAsks.at(-1).options.kind === 'warning',
+    'the delete button uses the native warning dialog');
+
+  window.managerFixture.answerDialog(true);
+  await pressKey(selectedButton, 'Delete');
+  await until(() => !fixtureRecord('dup-1'), 'Delete to remove the selected prompt');
+  check(window.managerFixture.state.dialogAsks.length === promptDialogs + 2,
+    'Delete opens the same native warning before removing a selected prompt');
+  check(window.managerFixture.state.confirmed.at(-1).includes('Same title'),
+    'the prompt Delete confirmation names the selected prompt');
+
+  const emptyFolder = folderSection('EMPTY FOLDER');
+  const emptyFolderTitle = emptyFolder.querySelector('[data-folder-title]');
+  emptyFolderTitle.focus();
+  window.managerFixture.answerDialog(true);
+  const folderConfirmations = window.managerFixture.state.confirmed.length;
+  await pressKey(emptyFolderTitle, 'Delete');
+  await until(() => !folderSection('EMPTY FOLDER'), 'Delete to remove the focused folder');
+  check(window.managerFixture.state.confirmed.length === folderConfirmations + 1,
+    'Delete asks before removing a focused folder');
+  check(lastCall('delete_folder')?.args.name === 'Empty folder',
+    'folder Delete targets the focused user folder');
+  return { group: 'fixed-shortcuts', assertions };
 }
 
 export async function runManagerLayoutChecks() {
@@ -1158,6 +1213,7 @@ export async function runManagerLayoutChecks() {
     await runEditorChecks(),
     await runFolderCrudChecks(),
     await runPromptContextChecks(),
+    await runFixedShortcutChecks(),
   ];
   return {
     assertions: results.reduce((total, result) => total + result.assertions, 0),

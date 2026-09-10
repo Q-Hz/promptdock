@@ -44,6 +44,11 @@ test("matchesKeybinding requires the exact key and modifier set", () => {
     false
   );
   assert.equal(matchesKeybinding(event({ key: "Escape" }), DEFAULT_KEY_BINDINGS.back), true);
+  assert.equal(matchesKeybinding(event({ key: "s", ctrlKey: true }), "cmdorctrl+s", "windows"), true);
+  assert.equal(matchesKeybinding(event({ key: "s", metaKey: true }), "cmdorctrl+s", "macos"), true);
+  assert.equal(matchesKeybinding(event({ key: "s", ctrlKey: true, shiftKey: true }), "cmdorctrl+s", "windows"), false);
+  assert.equal(matchesKeybinding(event({ key: "Delete" }), "delete", "windows"), true);
+  assert.equal(matchesKeybinding(event({ key: "Delete", ctrlKey: true }), "delete", "windows"), false);
 });
 
 test("cmdOrCtrl resolves to the platform primary modifier", () => {

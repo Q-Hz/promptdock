@@ -180,6 +180,7 @@ const state = {
   calls: [] as Array<{ command: string; args?: any }>,
   alerts: [] as string[],
   confirmed: [] as string[],
+  dialogAsks: [] as Array<{ message: string; options?: any }>,
   dialogAnswers: [] as boolean[],
 };
 const listeners = new Map<string, () => void>();
@@ -198,8 +199,9 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
   dialog: {
     open: async () => null,
     save: async () => null,
-    ask: async (message: string) => {
+    ask: async (message: string, options?: any) => {
       state.confirmed.push(String(message));
+      state.dialogAsks.push({ message: String(message), options: clone(options) });
       return state.dialogAnswers.shift() ?? false;
     },
   },
@@ -384,6 +386,9 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
     prefs = {};
     state.calls = [];
     state.alerts = [];
+    state.confirmed = [];
+    state.dialogAsks = [];
+    state.dialogAnswers = [];
     location.reload();
   },
   emit: (event: string) => listeners.get(event)?.(),

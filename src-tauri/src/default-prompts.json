@@ -1,6 +1,43 @@
 {
-  "exportedAt": 1788276102483,
+  "exportedAt": 1789053454064,
   "format": "promptdeck",
+  "organization": {
+    "folderOrder": [
+      "Note organization",
+      "Writing",
+      "Coding",
+      "Email",
+      "Productivity",
+      "Marketing"
+    ],
+    "pinnedOrder": [],
+    "promptOrderByFolder": {
+      "Coding": [
+        "0ab29ac0-cd81-4524-ad5f-6dc95693d2e8",
+        "b44e4cfe-140b-48a5-a702-ae1bc269f5d3",
+        "070a9aba-85e9-4cdf-82f5-7900b87d6790"
+      ],
+      "Email": [
+        "1ac960fb-4132-4f5a-8b53-295aac31c7bc",
+        "89c17d5b-d810-4928-9881-0a0bb8a9ce02"
+      ],
+      "Marketing": [
+        "6507480e-c04b-4072-8281-4eb2d5b946bb"
+      ],
+      "Note organization": [
+        "1717a59e-4dbf-4a21-b5c3-c1e55762cd8f",
+        "98897dd0-2bd2-462d-949a-a93c6f55569d"
+      ],
+      "Productivity": [
+        "b92b8096-4d70-4f0d-abc4-d69f60f49c5a",
+        "14112fa7-7568-495b-a518-e72244a66c32"
+      ],
+      "Writing": [
+        "7ce1e90f-6f11-4483-93df-8966bb2f2c36",
+        "df23ec2b-5081-433d-bf66-5b2e5f1e0931"
+      ]
+    }
+  },
   "prompts": [
     {
       "body": "Summarize the following text in {{count=5}} concise bullet points, keeping the key facts and numbers:\n\n{{text}}",
@@ -9,6 +46,7 @@
       "folder": "Writing",
       "id": "7ce1e90f-6f11-4483-93df-8966bb2f2c36",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "summary"
       ],
@@ -23,6 +61,7 @@
       "folder": "Writing",
       "id": "df23ec2b-5081-433d-bf66-5b2e5f1e0931",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "editing"
       ],
@@ -37,6 +76,7 @@
       "folder": "Coding",
       "id": "0ab29ac0-cd81-4524-ad5f-6dc95693d2e8",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "review"
       ],
@@ -51,6 +91,7 @@
       "folder": "Coding",
       "id": "b44e4cfe-140b-48a5-a702-ae1bc269f5d3",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "learning"
       ],
@@ -65,6 +106,7 @@
       "folder": "Coding",
       "id": "070a9aba-85e9-4cdf-82f5-7900b87d6790",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "debug"
       ],
@@ -79,6 +121,7 @@
       "folder": "Email",
       "id": "1ac960fb-4132-4f5a-8b53-295aac31c7bc",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "email"
       ],
@@ -93,6 +136,7 @@
       "folder": "Email",
       "id": "89c17d5b-d810-4928-9881-0a0bb8a9ce02",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "email"
       ],
@@ -107,6 +151,7 @@
       "folder": "Productivity",
       "id": "b92b8096-4d70-4f0d-abc4-d69f60f49c5a",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "ideas"
       ],
@@ -121,6 +166,7 @@
       "folder": "Productivity",
       "id": "14112fa7-7568-495b-a518-e72244a66c32",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "planning"
       ],
@@ -135,6 +181,7 @@
       "folder": "Marketing",
       "id": "6507480e-c04b-4072-8281-4eb2d5b946bb",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "sales",
         "email"
@@ -144,31 +191,33 @@
       "useCount": 0
     },
     {
-      "body": "请对以下提示词进行改写和标准化，使其更适合长期复用、分类和管理。\n\n### 原始提示词\n\n{{source_prompt}}\n\n### 备注\n\n{{note_language=[提示词用中文输出|提示词用英文输出]}}\n{{note}}\n\n请遵循以下要求：\n\n1. 生成标题\n   提炼一个简洁标题，长度控制在 3～8 个字，准确概括该提示词的核心用途。\n\n2. 生成 Tags\n   为提示词分配一个或多个合适的 Tags。优先从以下已有 Tags 中选择：\n   `writing | plotting | reading | Note organization | editing | planning | review`\n\n   如果已有 Tags 均不合适，可以创建新的 Tag。\n\n3. 生成 Folder\n   每条提示词只能归入一个 Folder。优先从以下已有 Folder 中选择：\n   `paper | Note organization | planning | editing`\n\n   如果已有 Folder 均不合适，可以创建新的 Folder。\n\n   注意区分 Folder 与 Tags 的层级：\n\n   * Folder 用于确定提示词的主要归属，只能有一个；\n   * Tags 用于描述提示词的用途、能力或特征，可以有多个；\n   * Folder 与 Tags 可以出现相同词汇，但两者承担不同的分类作用。\n\n4. 提取变量\n   分析原始提示词中适合复用或动态调整的内容，并使用双大括号 `{{}}` 将其变量化。\n\n   根据变量性质选择合适的形式，注意下列应该是双大括号，本处用单大括号代替：\n\n   * 普通变量：`{text}` \n   * 带默认值的变量：`{count=15}`\n   * 带可选值的变量：`{tone=[professional|casual|friendly|confident|empathetic]}`\n   * 多选变量：`{tags+=[React|Vue|Svelte]}`，勾选的值默认以逗号加空格连接，可用 `~` 指定连接符（支持 `\\n` 换行转义），如 `{lines+=[a|b|c]~\\n}`\n\n   只提取真正具有变化可能、且有助于提示词复用的内容。不要为了增加变量而变量化固定规则、核心任务逻辑或必要的质量要求。\n\n5. 改写提示词\n   在不改变原始任务目标和关键约束的前提下，对提示词进行必要的优化。\n\n   改写后的提示词不需要比原文更长或更复杂，重点是：\n\n   * 表意准确；\n   * 结构清晰；\n   * 便于复用；\n   * 变量设计合理；\n   * 不遗漏原提示词的重要要求。\n\n6. 处理备注\n   如果提供了 `备注`，需要根据备注进一步调整提示词。\n\n   当备注中的明确要求与一般改写规则存在冲突时，优先遵循备注中的明确要求，但不得破坏最终输出格式。\n\n请严格按照以下格式输出，不要添加额外说明（注意下列应该是双大括号，本处用单大括号代替）：\n\ntitle：{generated_title}\n\nTags (comma-separated)：{generated_tags}\n\nFolder：{generated_folder}\n\nPrompt body：\n\n{rewritten_prompt}\n",
+      "body": "请对以下提示词进行改写和标准化，使其更适合长期复用、分类和管理。\n\n### 原始提示词\n\n{{source_prompt}}\n\n### 备注\n\n{{note_language=[提示词用中文输出|提示词用英文输出]}}\n{{note}}\n\n请遵循以下要求：\n\n## 1. 生成标题\n\n提炼一个简洁标题，长度控制在 3～8 个字，准确概括该提示词的核心用途。\n\n## 2. 生成 Tags\n\n为提示词分配一个或多个合适的 Tags。优先从以下已有 Tags 中选择：\n\n`writing | plotting | reading | Note organization | editing | planning | review`\n\n如果已有 Tags 均不合适，可以创建新的 Tag。\n\n## 3. 生成 Folder\n\n每条提示词只能归入一个 Folder。优先从以下已有 Folder 中选择：\n\n`paper | Note organization | planning | editing`\n\n如果已有 Folder 均不合适，可以创建新的 Folder。\n\n注意区分 Folder 与 Tags 的层级：\n\n* Folder 用于确定提示词的主要归属，只能有一个；\n* Tags 用于描述提示词的用途、能力或特征，可以有多个；\n* Folder 与 Tags 可以出现相同词汇，但两者承担不同的分类作用。\n\n## 4. 提取变量\n\n分析原始提示词中适合复用或动态调整的内容，并将其转换为 PromptDock 支持的变量格式。\n\n变量设计要求：\n\n* 只提取真正具有变化可能、且有助于提示词复用的内容；\n* 不要为了增加变量而变量化固定规则、核心任务逻辑或必要的质量要求；\n* 优先变量化用户每次调用时可能不同的输入内容；\n* 不要将提示词中的固定要求、执行步骤、评价标准等内容变量化；\n* 变量名称应该清晰表达其代表的输入内容类型。\n\n变量类型根据实际情况选择：\n\n* 普通变量；\n* 带默认值变量；\n* 带可选值变量；\n* 多选变量。\n\n变量格式必须符合 PromptDock 的变量语法要求。\n\n注意：以下示例中的变量符号使用单括号表示，实际生成时需要使用 PromptDock 支持的变量格式。\n\n* 普通变量：`{text}`\n* 带默认值变量：`{count=15}`\n* 带可选值变量：`{tone=[professional|casual|friendly|confident|empathetic]}`\n* 多选变量：`{tags+=[React|Vue|Svelte]}`\n\n多选变量默认使用逗号加空格连接，可使用 `~` 指定连接符，支持 `\\n` 换行转义。\n\n### 变量使用规则（重要）\n\n请严格区分：\n\n1. 当前任务中的变量：\n\n   当前标准化提示词自身使用变量，用于接收用户输入。\n\n2. 输出结果中的变量：\n\n   标准化后的 Prompt body 可能需要包含变量，用于未来调用该 Prompt 时接收动态输入。\n\n变量名称只是一个占位标识，不代表实际输入内容。\n\n生成 Prompt body 时必须遵守：\n\n* 变量应该放置在用户未来需要输入内容的位置；\n* 变量名称应该代表输入内容的类型，而不是具体内容；\n* 不要把变量名称作为句子中的实际内容使用；\n* 不要在 Prompt 中解释某个变量代表什么；\n* 不要假设变量名称本身就是用户提供的信息；\n* 替换变量后，最终 Prompt 必须保持语义自然。\n\n例如：\n\n正确逻辑：\n\n“请分析用户提供的论文内容。”\n\n其中“论文内容”对应的位置应设计为变量。\n\n错误逻辑：\n\n“请分析 {paper_text}，其中 paper_text 是论文内容。”\n\n因为变量名称不应该出现在最终提示词的解释文本中。\n\n变量替换后，用户最终使用 Prompt 时看到的应该是实际填写的内容，而不是变量名称。\n\n## 5. 改写提示词\n\n在不改变原始任务目标和关键约束的前提下，对提示词进行必要优化。\n\n改写后的提示词重点：\n\n* 表意准确；\n* 结构清晰；\n* 便于复用；\n* 变量设计合理；\n* 不遗漏原提示词的重要要求。\n\n不要为了显得完整而增加原始提示词中不存在的任务、限制或能力。\n\n如果原始提示词已经比较完善，只进行必要的结构优化，不要过度改写。\n\n## 6. 处理备注\n\n如果提供了备注，需要根据备注进一步调整提示词。\n\n当备注中的明确要求与一般改写规则存在冲突时，优先遵循备注中的明确要求，但不得破坏最终输出格式。\n\n请严格按照以下格式输出，不要添加额外说明：\n\ntitle：{generated_title}\n\nTags (comma-separated)：{generated_tags}\n\nFolder：{generated_folder}\n\nPrompt body：\n\n{rewritten_prompt}\n",
       "createdAt": 1788084293760,
-      "favorite": false,
+      "favorite": true,
       "folder": "Note organization",
       "id": "1717a59e-4dbf-4a21-b5c3-c1e55762cd8f",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "Note organization"
       ],
       "title": "提示词标准化",
-      "updatedAt": 1788276057671,
+      "updatedAt": 1789053400374,
       "useCount": 0
     },
     {
-      "body": "Please rewrite and standardize the following prompt so that it is better suited for long-term reuse, categorization, and management.\n\n### Original Prompt\n\n{{source_prompt}}\n\n### Notes\n\n{{note_language=[Output the prompt in Chinese|Output the prompt in English]}}\n{{note}}\n\nPlease follow the requirements below:\n\n1. Generate a Title\n   Create a concise title of 3–8 characters that accurately summarizes the core purpose of the prompt.\n\n2. Generate Tags\n   Assign one or more appropriate Tags to the prompt. Prefer selecting from the following existing Tags:\n\n   `writing | plotting | reading | Note organization | editing | planning | review`\n\n   If none of the existing Tags are suitable, you may create a new Tag.\n\n3. Generate a Folder\n   Each prompt can belong to only one Folder. Prefer selecting from the following existing Folders:\n\n   `paper | Note organization | planning | editing`\n\n   If none of the existing Folders are suitable, you may create a new Folder.\n\n   Be sure to distinguish between the roles of Folder and Tags:\n\n   * Folder determines the prompt's primary category and there can only be one;\n   * Tags describe the prompt's purposes, capabilities, or characteristics, and multiple Tags may be assigned;\n   * Folder and Tags may use the same term, but they serve different classification purposes.\n\n4. Extract Variables\n   Analyze the original prompt and identify content that is suitable for reuse or dynamic adjustment, then convert it into variables using double curly braces `{{}}`.\n\n   Choose the appropriate variable format based on the nature of the variable. Note that the examples below should use double curly braces; single curly braces are used here only as substitutes:\n\n   * Standard variable: `{text}`\n   * Variable with a default value: `{count=15}`\n   * Variable with selectable values: `{tone=[professional|casual|friendly|confident|empathetic]}`\n   * Multi-select variable: `{tags+=[React|Vue|Svelte]}`. Selected values are joined by a comma followed by a space by default. Use `~` to specify a custom separator, including `\\n` for line breaks, for example: `{lines+=[a|b|c]~\\n}`\n\n   Only extract content that is genuinely likely to vary and that improves the reusability of the prompt. Do not turn fixed rules, core task logic, or essential quality requirements into variables merely to increase the number of variables.\n\n5. Rewrite the Prompt\n   Make the necessary improvements to the prompt without changing its original task objective or key constraints.\n\n   The rewritten prompt does not need to be longer or more complex than the original. Focus on:\n\n   * accurate wording;\n   * clear structure;\n   * ease of reuse;\n   * reasonable variable design;\n   * preserving all important requirements from the original prompt.\n\n6. Handle Notes\n   If `Notes` is provided, further adjust the prompt according to the notes.\n\n   If an explicit requirement in the notes conflicts with the general rewriting rules, prioritize the explicit requirement in the notes, as long as doing so does not break the required final output format.\n\nStrictly follow the output format below and do not add any additional explanations. Note that the placeholders below should use double curly braces; single curly braces are used here only as substitutes:\n\ntitle: {generated_title}\n\nTags (comma-separated): {generated_tags}\n\nFolder: {generated_folder}\n\nPrompt body:\n\n{rewritten_prompt}\n",
+      "body": "Please rewrite and standardize the following prompt so that it is more suitable for long-term reuse, categorization, and management.\n\n### Original Prompt\n\n{{source_prompt}}\n\n### Notes\n\n{{note_language=[Output prompt in Chinese|Output prompt in English]}}\n{{note}}\n\nPlease follow the requirements below:\n\n## 1. Generate Title\n\nGenerate a concise title with 3–8 words that accurately summarizes the core purpose of the prompt.\n\n## 2. Generate Tags\n\nAssign one or more appropriate Tags to the prompt. Prefer selecting from the existing Tags:\n\n`writing | plotting | reading | Note organization | editing | planning | review`\n\nIf none of the existing Tags are suitable, create a new Tag.\n\n## 3. Generate Folder\n\nEach prompt can belong to only one Folder. Prefer selecting from the existing Folders:\n\n`paper | Note organization | planning | editing`\n\nIf none of the existing Folders are suitable, create a new Folder.\n\nKeep the distinction between Folder and Tags:\n\n* Folder defines the primary category of the prompt and can only have one value;\n* Tags describe the prompt's functions, purposes, or characteristics and can have multiple values;\n* Folder and Tags may contain the same word, but they serve different classification purposes.\n\n## 4. Extract Variables\n\nAnalyze the original prompt and identify content that is suitable for reuse or dynamic adjustment. Convert these parts into PromptDock-supported variables.\n\nVariable design requirements:\n\n* Only extract content that is likely to change between different uses and improves prompt reusability;\n* Do not create variables unnecessarily;\n* Do not convert fixed rules, core task logic, execution steps, or quality requirements into variables;\n* Prioritize variables for user-provided inputs that may differ each time the prompt is used;\n* Variable names should clearly describe the type of input they represent.\n\nChoose appropriate variable types according to the situation:\n\n* Normal variable;\n* Variable with a default value;\n* Variable with selectable options;\n* Multi-select variable.\n\nThe generated variables must follow PromptDock's variable syntax.\n\nNote: In the examples below, single brackets are used only to describe the syntax format and avoid being interpreted as variables. The actual generated output should use PromptDock-supported variable syntax.\n\n* Normal variable: `{text}`\n* Variable with default value: `{count=15}`\n* Variable with selectable options: `{tone=[professional|casual|friendly|confident|empathetic]}`\n* Multi-select variable: `{tags+=[React|Vue|Svelte]}`\n\nMulti-select variables use comma and space as the default separator. The separator can be customized with `~`. Newline escaping using `\\n` is supported.\n\n### Important Variable Usage Rules\n\nStrictly distinguish between two types of variables:\n\n1. Variables in this standardization prompt:\n\nThese variables are used by the current prompt to receive user input during the standardization process.\n\n2. Variables in the generated Prompt body:\n\nThe standardized Prompt body may contain variables, which are used when the generated prompt is called in the future.\n\nA variable name is only a placeholder identifier. It does not represent the actual user-provided content.\n\nWhen generating the Prompt body:\n\n* Place variables only where future users need to provide dynamic input;\n* Variable names should represent the type of input, not the actual content itself;\n* Do not use variable names as natural language content in the prompt;\n* Do not explain what a variable represents inside the prompt;\n* Do not assume that the variable name itself is the information provided by the user;\n* After variable replacement, the final prompt should remain natural and semantically complete.\n\nFor example:\n\nCorrect logic:\n\n\"The prompt should analyze the paper content provided by the user.\"\n\nThe location requiring the paper content should be converted into a variable.\n\nIncorrect logic:\n\n\"Analyze {paper_text}, where paper_text represents the paper content.\"\n\nThe variable name itself should not appear as explanatory text inside the final prompt.\n\nAfter variable replacement, users should see the actual provided content, not the variable name.\n\n## 5. Rewrite the Prompt\n\nRewrite the prompt while preserving the original task objective and key constraints.\n\nThe rewritten prompt should focus on:\n\n* Clear expression;\n* Structured organization;\n* Reusability;\n* Reasonable variable design;\n* Preserving important requirements from the original prompt.\n\nDo not add tasks, restrictions, or capabilities that do not exist in the original prompt.\n\nIf the original prompt is already well-structured, only make necessary improvements instead of rewriting excessively.\n\n## 6. Process Notes\n\nIf Notes are provided, adjust the prompt according to those requirements.\n\nWhen explicit requirements in Notes conflict with general rewriting rules, prioritize the Notes, but do not violate the required output format.\n\nOutput strictly in the following format. Do not add any additional explanations:\n\ntitle：{generated_title}\n\nTags (comma-separated)：{generated_tags}\n\nFolder：{generated_folder}\n\nPrompt body：\n\n{rewritten_prompt}\n",
       "createdAt": 1788084800854,
       "favorite": true,
       "folder": "Note organization",
       "id": "98897dd0-2bd2-462d-949a-a93c6f55569d",
       "lastUsedAt": null,
+      "pinned": false,
       "tags": [
         "Note organization"
       ],
       "title": "Prompt Standardization",
-      "updatedAt": 1788276070211,
+      "updatedAt": 1789053449620,
       "useCount": 0
     }
   ],
