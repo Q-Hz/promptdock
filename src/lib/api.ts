@@ -137,6 +137,7 @@ export const api = {
   getOnboardingStatus: (): Promise<OnboardingStatus> => invoke("get_onboarding_status"),
   completeOnboarding: (): Promise<void> => invoke("complete_onboarding"),
   hideMain: (): Promise<void> => invoke("hide_main"),
+  setLauncherPreview: (open: boolean): Promise<void> => invoke("set_launcher_preview", { open }),
   openManager: (): Promise<void> => invoke("open_manager"),
   exportPrompts: (path: string): Promise<void> => invoke("export_prompts", { path }),
   // 覆盖模式导入：清空当前全部 Prompt 后导入文件内容与规范化顺序

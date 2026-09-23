@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   api, filterPrompts, parseVariables, renderBody,
   type Organization, type Prompt, type ParsedVar, type Settings,
@@ -9,10 +10,13 @@ import { t, translateApiError } from "../lib/i18n";
 import {
   DEFAULT_KEY_BINDINGS, formatKeybinding, matchesKeybinding, type KeyBindings,
 } from "../lib/keybindings";
+import { launcherBackAction, type LauncherStage } from "../lib/launcher-navigation";
+import { renderPreviewMarkdown } from "../lib/markdown-preview";
+import { MutationQueue } from "../lib/mutation-queue";
 
-type Stage = "search" | "variables" | "result";
+const PREVIEW_PREF_KEY = "launcher.markdownPreviewOpen";
 
-const stage = ref<Stage>("search");
+const stage = ref<LauncherStage>("search");
 const query = ref("");
 const prompts = ref<Prompt[]>([]);
 const organization = ref<Organization>(emptyOrganization());
@@ -20,6 +24,10 @@ const selectedId = ref<string | null>(null);
 const selIndex = ref(0);
 const varValues = ref<Record<string, string | string[]>>({});
 const resultText = ref("");
+const previewOpen = ref(false);
+const previewHtml = computed(() => renderPreviewMarkdown(resultText.value));
+const previewWrites = new MutationQueue();
+const resizeWrites = new MutationQueue();
 const copied = ref(false);
 const copying = ref(false);
 const errorMessage = ref("");
@@ -31,6 +39,8 @@ const focusedVar = ref<string | null>(null);
 const keyboardNav = ref(false);
 let unlistenMainShown: (() => void) | undefined;
 let unlistenSettings: (() => void) | undefined;
+let blurHideTimer: number | undefined;
+let blurGeneration = 0;
 
 // 置顶优先、非置顶按最近使用；搜索只过滤结果，不改变排序规则（PRD 4.5）
 const filtered = computed(() =>
@@ -77,7 +87,13 @@ async function reload() {
 }
 
 onMounted(async () => {
+  window.addEventListener("keydown", onKeydown);
   reset();
+  try {
+    previewOpen.value = (await api.getUiPrefs(PREVIEW_PREF_KEY)) === "true";
+  } catch {
+    // 偏好读取失败时保持默认关闭，调用流程仍可使用。
+  }
   await reload();
   try {
     unlistenMainShown = await (window as any).__TAURI__.event.listen("main-shown", async () => {
@@ -99,12 +115,18 @@ onMounted(async () => {
     // 键位读取失败时保留默认键位，不影响启动器使用
   }
   window.addEventListener("blur", handleWindowBlur);
+  window.addEventListener("focus", cancelPendingHide);
+  window.addEventListener("resize", cancelPendingHide);
 });
 
 onUnmounted(() => {
   unlistenMainShown?.();
   unlistenSettings?.();
   window.removeEventListener("blur", handleWindowBlur);
+  window.removeEventListener("focus", cancelPendingHide);
+  window.removeEventListener("resize", cancelPendingHide);
+  cancelPendingHide();
+  window.removeEventListener("keydown", onKeydown);
 });
 
 function applyBindings(settings: Settings) {
@@ -116,7 +138,34 @@ function applyBindings(settings: Settings) {
 }
 
 function handleWindowBlur() {
-  if (stage.value === "search") void api.hideMain();
+  if (stage.value !== "search") return;
+  cancelPendingHide();
+  const generation = blurGeneration;
+  // Native move/resize briefly blurs the WebView on Windows. Hide only if focus stays away.
+  blurHideTimer = window.setTimeout(async () => {
+    blurHideTimer = undefined;
+    if (stage.value !== "search" || document.hasFocus()) return;
+    try {
+      if (await getCurrentWindow().isFocused()) return;
+    } catch {
+      return;
+    }
+    if (generation === blurGeneration && stage.value === "search" && !document.hasFocus()) {
+      void api.hideMain();
+    }
+  }, 150);
+}
+
+function cancelPendingHide() {
+  window.clearTimeout(blurHideTimer);
+  blurHideTimer = undefined;
+  blurGeneration += 1;
+}
+
+function startLauncherDrag(event: MouseEvent) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  void getCurrentWindow().startDragging().catch(() => undefined);
 }
 
 function reset() {
@@ -202,6 +251,25 @@ function generate() {
   });
 }
 
+function togglePreview() {
+  previewOpen.value = !previewOpen.value;
+  const value = String(previewOpen.value);
+  void previewWrites.run(() => api.setUiPrefs(PREVIEW_PREF_KEY, value)).catch(() => {
+    errorMessage.value = t("previewSaveFailed");
+  });
+}
+
+function onPreviewClick(event: MouseEvent) {
+  if ((event.target as Element).closest("a")) event.preventDefault();
+}
+
+watch([stage, previewOpen], ([currentStage, open]) => {
+  const expanded = currentStage === "result" && open;
+  void resizeWrites.run(() => api.setLauncherPreview(expanded)).catch(() => {
+    if (stage.value === "result") errorMessage.value = t("previewResizeFailed");
+  });
+});
+
 async function copyAndClose() {
   if (copying.value) return;
   copying.value = true;
@@ -235,8 +303,10 @@ function onKeydown(e: KeyboardEvent) {
   if (inTextField && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) return;
 
   if (matchesKeybinding(e, bindings.value.back)) {
-    if (stage.value === "search") api.hideMain();
-    else if (stage.value === "variables") reset();
+    e.preventDefault();
+    const action = launcherBackAction(stage.value);
+    if (action === "hide") api.hideMain();
+    else if (action === "reset") reset();
     else stage.value = "variables";
     return;
   }
@@ -265,14 +335,14 @@ function onKeydown(e: KeyboardEvent) {
 </script>
 
 <template>
-  <div data-launcher-shell class="flex h-full flex-col overflow-hidden rounded-xl border border-neutral-300 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-800" @keydown="onKeydown">
+  <div data-launcher-shell class="flex h-full flex-col overflow-hidden rounded-xl border border-neutral-300 bg-white shadow-2xl dark:border-neutral-700 dark:bg-neutral-800">
     <div
-      data-tauri-drag-region
       data-launcher-drag
       class="flex h-5 shrink-0 cursor-move items-center justify-center border-b border-neutral-100 dark:border-neutral-700/70"
       :title="t('dragWindow')"
+      @mousedown="startLauncherDrag"
     >
-      <span data-tauri-drag-region class="h-1 w-10 rounded-full bg-neutral-300 dark:bg-neutral-600" />
+      <span class="h-1 w-10 rounded-full bg-neutral-300 dark:bg-neutral-600" />
     </div>
     <!-- 搜索阶段 -->
     <div v-if="stage === 'search'" class="flex min-h-0 flex-1 flex-col">
@@ -280,6 +350,7 @@ function onKeydown(e: KeyboardEvent) {
         <input
           id="launcher-input"
           v-model="query"
+          autocomplete="off"
           :placeholder="t('launcherSearchPlaceholder')"
           class="w-full bg-transparent text-base outline-none placeholder:text-neutral-400"
           autofocus
@@ -412,11 +483,40 @@ function onKeydown(e: KeyboardEvent) {
     <!-- 结果编辑阶段 -->
     <div v-else class="flex min-h-0 flex-1 flex-col">
       <div data-launcher-content class="flex min-h-0 flex-1 flex-col p-4">
-        <textarea
-          id="result-input"
-          v-model="resultText"
-          class="flex-1 resize-none rounded-md border border-neutral-300 bg-white p-2 font-mono text-sm outline-none dark:border-neutral-600 dark:bg-neutral-700"
-        />
+        <div class="mb-2 flex shrink-0 items-center justify-between gap-3">
+          <span class="text-xs font-medium text-neutral-500 dark:text-neutral-400">{{ t("resultSource") }}</span>
+          <button
+            type="button"
+            data-preview-toggle
+            :aria-pressed="previewOpen"
+            :aria-label="previewOpen ? t('closePreview') : t('openPreview')"
+            class="rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-blue-300 dark:hover:bg-blue-900/30"
+            @click="togglePreview"
+            @keydown.enter.stop
+            @keydown.space.stop
+          >
+            <span aria-hidden="true" class="mr-1">{{ previewOpen ? "≪" : "≫" }}</span>
+            {{ previewOpen ? t("closePreview") : t("openPreview") }}
+          </button>
+        </div>
+        <div class="flex min-h-0 flex-1 gap-3">
+          <textarea
+            id="result-input"
+            v-model="resultText"
+            :aria-label="t('resultSource')"
+            class="min-h-0 min-w-0 flex-1 resize-none rounded-md border border-neutral-300 bg-white p-2 font-mono text-sm outline-none dark:border-neutral-600 dark:bg-neutral-700"
+          />
+          <aside
+            v-if="previewOpen"
+            class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-md border border-neutral-300 bg-neutral-50 dark:border-neutral-600 dark:bg-neutral-800"
+            :aria-label="t('resultPreview')"
+          >
+            <div class="shrink-0 border-b border-neutral-200 px-3 py-2 text-xs font-medium text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+              {{ t("resultPreview") }}
+            </div>
+            <div data-markdown-preview class="min-h-0 flex-1 overflow-auto px-4 py-3 text-sm" v-html="previewHtml" @click="onPreviewClick" />
+          </aside>
+        </div>
         <div class="mt-3 flex justify-end gap-2">
           <p v-if="errorMessage" class="mr-auto self-center text-xs text-red-500">{{ errorMessage }}</p>
           <button tabindex="-1" class="rounded-md px-3 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="stage = 'variables'">{{ t("back") }}</button>

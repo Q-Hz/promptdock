@@ -23,6 +23,46 @@ use tauri::{
 pub struct DbState(pub Mutex<Connection>);
 pub struct HotkeyRegistrationState(pub AtomicBool);
 
+struct LauncherGeometry {
+    expanded: bool,
+    compact_width: f64,
+    preview_width: f64,
+}
+
+impl Default for LauncherGeometry {
+    fn default() -> Self {
+        Self {
+            expanded: false,
+            compact_width: 640.0,
+            preview_width: 1100.0,
+        }
+    }
+}
+
+impl LauncherGeometry {
+    fn remember_width(&mut self, width: f64) {
+        if self.expanded {
+            self.preview_width = width;
+        } else {
+            self.compact_width = width;
+        }
+    }
+
+    fn target_width(&self, expanded: bool, monitor_width: Option<f64>) -> f64 {
+        let preferred = if expanded {
+            self.preview_width.max(self.compact_width)
+        } else {
+            self.compact_width
+        };
+        let max_width = monitor_width
+            .map(|width| (width - 32.0).max(480.0))
+            .unwrap_or(f64::INFINITY);
+        preferred.clamp(480.0, max_width)
+    }
+}
+
+pub struct LauncherGeometryState(Mutex<LauncherGeometry>);
+
 const DEFAULT_GLOBAL_HOTKEY: &str = "cmdorctrl+shift+space";
 const ONBOARDING_COMPLETED_KEY: &str = "onboarding_completed";
 
@@ -1390,18 +1430,54 @@ fn update_tray_menu(app: &AppHandle, settings: &Settings) -> Result<(), String> 
     Ok(())
 }
 
+fn center_launcher_window(win: &tauri::WebviewWindow) -> Result<(), String> {
+    let monitor = win.current_monitor().map_err(|e| e.to_string())?;
+    if let Some(m) = monitor {
+        let window_size = win.outer_size().map_err(|e| e.to_string())?;
+        win.set_position(tauri::PhysicalPosition::new(
+            m.position().x + (m.size().width as i32 - window_size.width as i32) / 2,
+            m.position().y + (m.size().height as i32 - window_size.height as i32) / 3,
+        ))
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn resize_launcher_window(
+    win: &tauri::WebviewWindow,
+    state: &LauncherGeometryState,
+    expanded: bool,
+) -> Result<(), String> {
+    let mut geometry = state.0.lock().map_err(|e| e.to_string())?;
+    if geometry.expanded == expanded {
+        return Ok(());
+    }
+    let scale = win.scale_factor().map_err(|e| e.to_string())?;
+    let current = win.inner_size().map_err(|e| e.to_string())?;
+    geometry.remember_width(current.width as f64 / scale);
+    let monitor_width = win
+        .current_monitor()
+        .map_err(|e| e.to_string())?
+        .map(|monitor| monitor.size().width as f64 / scale);
+    let width = geometry.target_width(expanded, monitor_width);
+    win.set_size(tauri::LogicalSize::new(
+        width,
+        current.height as f64 / scale,
+    ))
+    .map_err(|e| e.to_string())?;
+    geometry.expanded = expanded;
+    drop(geometry);
+    center_launcher_window(win)
+}
+
 fn toggle_main(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         if win.is_visible().unwrap_or(false) {
             let _ = win.hide();
         } else {
-            if let Ok(Some(m)) = win.current_monitor() {
-                let window_size = win.outer_size().unwrap_or_default();
-                let _ = win.set_position(tauri::PhysicalPosition::new(
-                    m.position().x + (m.size().width as i32 - window_size.width as i32) / 2,
-                    m.position().y + (m.size().height as i32 - window_size.height as i32) / 3,
-                ));
-            }
+            let _ =
+                resize_launcher_window(&win, app.state::<LauncherGeometryState>().inner(), false);
+            let _ = center_launcher_window(&win);
             let _ = win.show();
             let _ = win.set_focus();
             let _ = app.emit("main-shown", ());
@@ -1414,6 +1490,14 @@ fn hide_main(app: AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
     }
+}
+
+#[tauri::command]
+fn set_launcher_preview(app: AppHandle, open: bool) -> Result<(), String> {
+    let win = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Launcher window is unavailable".to_string())?;
+    resize_launcher_window(&win, app.state::<LauncherGeometryState>().inner(), open)
 }
 
 #[tauri::command]
@@ -1909,6 +1993,7 @@ pub fn run() {
             get_onboarding_status,
             complete_onboarding,
             hide_main,
+            set_launcher_preview,
             open_manager,
             export_prompts,
             import_prompts,
@@ -1925,6 +2010,9 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let (conn, should_show_onboarding) = init_db(&app_handle);
             app.manage(DbState(Mutex::new(conn)));
+            app.manage(LauncherGeometryState(Mutex::new(
+                LauncherGeometry::default(),
+            )));
             app.manage(PendingUpdate(Mutex::new(None)));
             app.manage(CloseGate(Mutex::new(None)));
             app.manage(QuitGate(Mutex::new(None)));
@@ -2004,6 +2092,21 @@ fn main() {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn launcher_preview_width_respects_monitor_space_and_restores_manual_width() {
+        let mut geometry = LauncherGeometry::default();
+        assert_eq!(geometry.target_width(false, Some(1600.0)), 640.0);
+        assert_eq!(geometry.target_width(true, Some(1600.0)), 1100.0);
+        assert_eq!(geometry.target_width(true, Some(900.0)), 868.0);
+
+        geometry.remember_width(760.0);
+        assert_eq!(geometry.target_width(false, None), 760.0);
+        geometry.expanded = true;
+        geometry.remember_width(1250.0);
+        assert_eq!(geometry.target_width(true, Some(1600.0)), 1250.0);
+        assert_eq!(geometry.target_width(false, Some(1600.0)), 760.0);
+    }
 
     fn import_document(format: Option<&str>, version: u64) -> serde_json::Value {
         let mut document = serde_json::json!({
