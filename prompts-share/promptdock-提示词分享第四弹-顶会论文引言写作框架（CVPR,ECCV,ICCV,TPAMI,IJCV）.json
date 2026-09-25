@@ -1,0 +1,134 @@
+{
+  "exportedAt": 1790342215343,
+  "format": "promptdeck",
+  "organization": {
+    "folderOrder": [
+      "Note organization",
+      "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）"
+    ],
+    "pinnedOrder": [],
+    "promptOrderByFolder": {
+      "Note organization": [
+        "1717a59e-4dbf-4a21-b5c3-c1e55762cd8f"
+      ],
+      "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）": [
+        "edc63857-2467-4355-ac05-2dda87940da0",
+        "6bf93f66-f91e-4cf2-8ccd-4de33e8219a9",
+        "592c971b-ca0c-4763-b7ff-f35d8c2b0ebd",
+        "57d0ff82-f001-435f-b1ab-0ec635fe5135",
+        "eeb79945-bcc2-4571-8f14-968017589f1b",
+        "fb452d4d-c5c8-43ee-9169-18be85216f90",
+        "ea9ea8d6-cbee-43f1-a537-e5ad6514bfd1"
+      ]
+    }
+  },
+  "prompts": [
+    {
+      "body": "请对以下提示词进行改写和标准化，使其更适合长期复用、分类和管理。\n\n### 原始提示词\n\n{{source_prompt}}\n\n### 备注\n\n{{note_language=[提示词用中文输出|提示词用英文输出]}}\n{{note}}\n\n请遵循以下要求：\n\n## 1. 生成标题\n\n提炼一个简洁标题，长度控制在 3～8 个字，准确概括该提示词的核心用途。\n\n## 2. 生成 Tags\n\n为提示词分配一个或多个合适的 Tags。优先从以下已有 Tags 中选择：\n\n`writing | plotting | reading | Note organization | editing | planning | review`\n\n如果已有 Tags 均不合适，可以创建新的 Tag。\n\n## 3. 生成 Folder\n\n每条提示词只能归入一个 Folder。优先从以下已有 Folder 中选择：\n\n`paper | Note organization | planning | editing`\n\n如果已有 Folder 均不合适，可以创建新的 Folder。\n\n注意区分 Folder 与 Tags 的层级：\n\n* Folder 用于确定提示词的主要归属，只能有一个；\n* Tags 用于描述提示词的用途、能力或特征，可以有多个；\n* Folder 与 Tags 可以出现相同词汇，但两者承担不同的分类作用。\n\n## 4. 提取变量\n\n分析原始提示词中适合复用或动态调整的内容，并将其转换为 PromptDock 支持的变量格式。\n\n变量设计要求：\n\n* 只提取真正具有变化可能、且有助于提示词复用的内容；\n* 不要为了增加变量而变量化固定规则、核心任务逻辑或必要的质量要求；\n* 优先变量化用户每次调用时可能不同的输入内容；\n* 不要将提示词中的固定要求、执行步骤、评价标准等内容变量化；\n* 变量名称应该清晰表达其代表的输入内容类型。\n\n变量类型根据实际情况选择：\n\n* 普通变量；\n* 带默认值变量；\n* 带可选值变量；\n* 多选变量。\n\n变量格式必须符合 PromptDock 的变量语法要求。\n\n注意：以下示例中的变量符号使用单括号表示，实际生成时需要使用 PromptDock 支持的变量格式。\n\n* 普通变量：`{text}`\n* 带默认值变量：`{count=15}`\n* 带可选值变量：`{tone=[professional|casual|friendly|confident|empathetic]}`\n* 多选变量：`{tags+=[React|Vue|Svelte]}`\n\n多选变量默认使用逗号加空格连接，可使用 `~` 指定连接符，支持 `\\n` 换行转义。\n\n### 变量使用规则（重要）\n\n请严格区分：\n\n1. 当前任务中的变量：\n\n   当前标准化提示词自身使用变量，用于接收用户输入。\n\n2. 输出结果中的变量：\n\n   标准化后的 Prompt body 可能需要包含变量，用于未来调用该 Prompt 时接收动态输入。\n\n变量名称只是一个占位标识，不代表实际输入内容。\n\n生成 Prompt body 时必须遵守：\n\n* 变量应该放置在用户未来需要输入内容的位置；\n* 变量名称应该代表输入内容的类型，而不是具体内容；\n* 不要把变量名称作为句子中的实际内容使用；\n* 不要在 Prompt 中解释某个变量代表什么；\n* 不要假设变量名称本身就是用户提供的信息；\n* 替换变量后，最终 Prompt 必须保持语义自然。\n\n例如：\n\n正确逻辑：\n\n“请分析用户提供的论文内容。”\n\n其中“论文内容”对应的位置应设计为变量。\n\n错误逻辑：\n\n“请分析 {paper_text}，其中 paper_text 是论文内容。”\n\n因为变量名称不应该出现在最终提示词的解释文本中。\n\n变量替换后，用户最终使用 Prompt 时看到的应该是实际填写的内容，而不是变量名称。\n\n## 5. 改写提示词\n\n在不改变原始任务目标和关键约束的前提下，对提示词进行必要优化。\n\n改写后的提示词重点：\n\n* 表意准确；\n* 结构清晰；\n* 便于复用；\n* 变量设计合理；\n* 不遗漏原提示词的重要要求。\n\n不要为了显得完整而增加原始提示词中不存在的任务、限制或能力。\n\n如果原始提示词已经比较完善，只进行必要的结构优化，不要过度改写。\n\n## 6. 处理备注\n\n如果提供了备注，需要根据备注进一步调整提示词。\n\n当备注中的明确要求与一般改写规则存在冲突时，优先遵循备注中的明确要求，但不得破坏最终输出格式。\n\n请严格按照以下格式输出，不要添加额外说明：\n\ntitle：{generated_title}\n\nTags (comma-separated)：{generated_tags}\n\nFolder：{generated_folder}\n\nPrompt body：\n\n{rewritten_prompt}\n",
+      "createdAt": 1788084293760,
+      "favorite": true,
+      "folder": "Note organization",
+      "id": "1717a59e-4dbf-4a21-b5c3-c1e55762cd8f",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [
+        "Note organization"
+      ],
+      "title": "提示词标准化",
+      "updatedAt": 1790341907983,
+      "useCount": 0
+    },
+    {
+      "body": "你是一位在计算机视觉和深度学习领域具有丰富顶会论文发表经验的资深研究员。\n\n请帮助我撰写一篇面向 CVPR、ECCV、ICCV 等顶级会议，以及 TPAMI、IJCV 等顶级期刊投稿论文的 Introduction 部分。\n\n引言整体采用深度学习领域常见的“五段式倒三角结构”：\n\n第一段：从领域背景切入，引出研究问题和核心挑战；\n第二段：总结现有研究方向，并分析已有方法的不足；\n第三段：提出本文方法，并说明其如何解决上述问题；\n第四段：总结论文主要贡献，并突出方法优势；\n第五段：介绍论文整体结构。\n\n要求逻辑逐层收缩，从宏观研究背景逐渐聚焦到本文具体问题。",
+      "createdAt": 1790341946968,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "edc63857-2467-4355-ac05-2dda87940da0",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "角色设定与整体框架",
+      "updatedAt": 1790341982667,
+      "useCount": 0
+    },
+    {
+      "body": "请撰写论文 Introduction 最后一段。\n\n要求：\n\n使用简洁标准的论文表达介绍全文结构。\n\n示例逻辑：\n\n本文其余部分安排如下：\n第二节介绍相关工作；\n第三节介绍本文提出的方法；\n第四节介绍实验设置与结果分析；\n第五节总结全文并讨论未来工作。\n\n要求：\n- 简洁；\n- 不重复前文内容；\n- 使用正式论文语言。",
+      "createdAt": 1790342010080,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "fb452d4d-c5c8-43ee-9169-18be85216f90",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "第五段——论文结构介绍",
+      "updatedAt": 1790342012892,
+      "useCount": 0
+    },
+    {
+      "body": "请撰写论文 Introduction 第一段。\n\n写作目标：\n从前沿领域背景切入，逐渐聚焦到本文研究方向，并提出当前领域面临的关键挑战。\n\n具体要求：\n\n1. 首先从较高层次的研究背景展开，例如：\n- 通用人工智能的发展需求；\n- 大规模预训练模型的发展趋势；\n- 多模态学习的发展瓶颈；\n- 当前智能系统面临的泛化能力、效率或可靠性问题。\n\n2. 随后逐步缩小范围，聚焦到本文所属研究领域，例如：\n- 目标检测；\n- 语义分割；\n- 三维重建；\n- 医学图像分析；\n- 时序预测等。\n\n3. 明确指出当前领域仍未解决的核心问题。\n\n要求：\n- 使用现在时描述领域现状和存在的问题；\n- 强调问题的重要性和普遍性；\n- 避免直接介绍本文方法；\n- 突出“挑战、瓶颈、局限性、迫切需求”等逻辑。\n\n参考关键词：\n{{key_words=challenge, bottleneck, limitation, urgently requires}}\n",
+      "createdAt": 1790341959425,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "6bf93f66-f91e-4cf2-8ccd-4de33e8219a9",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "第一段——领域背景与研究痛点",
+      "updatedAt": 1790342100575,
+      "useCount": 0
+    },
+    {
+      "body": "请撰写论文 Introduction 第二段。\n\n写作目标：\n总结当前领域代表性研究，并自然引出现有方法仍存在的问题。\n\n具体要求：\n\n1. 回顾3~4类具有代表性的近期研究方向。\n优先关注：\n- 最近两三年发表在 CVPR、ECCV、ICCV、NeurIPS、ICML、ICLR、TPAMI 等顶会顶刊的方法。\n\n2. 描述已有工作的主要思想：\n- 这些方法解决了什么问题；\n- 使用了什么关键技术；\n- 取得了什么效果。\n\n3. 明确指出这些方法仍然存在的不足。\n\n不足分析应具体，例如：\n- 依赖大量人工标注数据；\n- 泛化能力不足；\n- 对长尾分布不鲁棒；\n- 计算复杂度过高；\n- 缺乏理论解释；\n- 在真实场景部署困难。\n\n要求：\n- 描述已有工作时使用过去时；\n- 使用“然而”“尽管”“但是”等转折自然引出不足；\n- 不简单罗列论文，而需要形成研究演进逻辑。\n\n参考关键词：\n{{key_words=However, Although, Nevertheless, remain unresolved, limited by}}",
+      "createdAt": 1790341970973,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "592c971b-ca0c-4763-b7ff-f35d8c2b0ebd",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "第二段——相关工作与现有不足",
+      "updatedAt": 1790342155296,
+      "useCount": 0
+    },
+    {
+      "body": "请撰写论文 Introduction 第三段。\n\n写作目标：\n从现有方法不足自然过渡到本文提出的方法。\n\n具体要求：\n\n1. 首先使用明确转折，引出本文工作。\n\n例如：\n“To address these challenges, we propose...”\n\n2. 用一句话概括本文核心思想：\n\n说明：\n- 提出了什么方法；\n- 针对什么关键问题；\n- 如何解决第二段提出的核心不足。\n\n例如：\n“我们提出一种自适应多尺度特征融合网络，以解决复杂场景中的尺度变化问题。”\n\n3. 简要介绍方法中的关键技术创新。\n\n重点描述2~3个真正影响性能的技术设计，例如：\n- 新的网络结构；\n- 特征融合机制；\n- 注意力机制；\n- 损失函数设计；\n- 数据建模方式；\n- 优化策略。\n\n要求：\n- 不堆砌技术名词；\n- 强调创新与问题之间的对应关系；\n- 使用现在时描述本文方法。\n\n参考关键词：\n{{key_words=To address this issue,we propose,our method,the main idea is}}\n",
+      "createdAt": 1790341994458,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "57d0ff82-f001-435f-b1ab-0ec635fe5135",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "第三段——提出本文方法与核心创新",
+      "updatedAt": 1790342174929,
+      "useCount": 0
+    },
+    {
+      "body": "请撰写论文 Introduction 第四段。\n\n写作目标：\n总结本文主要贡献，并突出方法相对于已有工作的优势。\n\n要求：\n\n1. 使用条目形式总结2~4条主要贡献。\n\n每条贡献必须：\n- 具体；\n- 可验证；\n- 与前文提出的问题对应；\n- 避免空泛描述。\n\n推荐结构：\n\n(1) 提出一种新的方法/框架；\n(2) 设计一种关键技术模块；\n(3) 构建新的数据集、实验方案或理论分析；\n(4) 在多个基准数据集上验证有效性。\n\n2. 强调方法优势：\n例如：\n- 更高准确率；\n- 更强泛化能力；\n- 更低计算成本；\n- 更好的鲁棒性。\n\n注意：\n避免夸大，例如：\n“首次解决所有问题”\n“完全突破限制”\n\n应基于实验结果进行客观描述。\n\n参考关键词：\n{{key_words=The main contributions are:\nOur contributions can be summarized as follows:}}\n",
+      "createdAt": 1790342003360,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "eeb79945-bcc2-4571-8f14-968017589f1b",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "第四段——贡献总结与优势强调",
+      "updatedAt": 1790342192309,
+      "useCount": 0
+    },
+    {
+      "body": "请对生成的 Introduction 进行顶会论文风格审查。\n\n## Introduction内容\n\n{{Introduction}}\n\n## 重点检查\n\n### 1. 时态规范\n\n背景和问题：\n- 使用现在时；\n- 描述当前领域状态。\n\n相关工作：\n- 使用过去时；\n- 描述已有研究完成的工作。\n\n本文方法：\n- 使用现在时或将来时；\n- 描述本文提出的方法和贡献。\n\n---\n\n### 2. 引用规范\n\n检查参考文献是否符合顶会论文要求：\n\n优先引用：\n- CVPR\n- ICCV\n- ECCV\n- NeurIPS\n- ICML\n- ICLR\n- TPAMI\n- IJCV\n\n优先选择：\n- 最近三年发表的重要工作；\n- 高影响力方法；\n- 与本文问题高度相关的研究。\n\n避免：\n- 大量引用低水平会议；\n- 过度依赖 arXiv 预印本；\n- 为堆引用而引用。\n\n---\n\n### 3. 逻辑检查\n\n检查 Introduction 是否满足：\n\n背景 → 问题 → 现有方法 → 不足 → 本文方法 → 贡献\n\n的倒三角逻辑。\n\n重点发现：\n- 是否过早介绍本文方法；\n- 是否存在问题提出不足；\n- 是否存在“已有工作不足”但没有证据支撑；\n- 是否存在创新点与问题不对应。",
+      "createdAt": 1790342022743,
+      "favorite": false,
+      "folder": "顶会论文引言写作框架（CVPR / ECCV / ICCV / TPAMI / IJCV）",
+      "id": "ea9ea8d6-cbee-43f1-a537-e5ad6514bfd1",
+      "lastUsedAt": null,
+      "pinned": false,
+      "tags": [],
+      "title": "整体语言与引用规范检查",
+      "updatedAt": 1790342198017,
+      "useCount": 0
+    }
+  ],
+  "version": 1
+}
