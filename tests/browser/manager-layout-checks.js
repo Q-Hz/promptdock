@@ -1105,6 +1105,22 @@ export async function runFolderCrudChecks() {
 export async function runPromptContextChecks() {
   let assertions = 0;
   const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
+  const selectedRow = document.querySelector('[data-prompt-id].bg-blue-500');
+  check(!!selectedRow, 'a prompt row is selected');
+  const selectedMenu = await openRowContextMenu(selectedRow.closest('section'), selectedRow.dataset.promptId);
+  const luminance = (color) => {
+    const channels = color.match(/\d+(?:\.\d+)?/g).slice(0, 3).map((value) => Number(value) / 255);
+    const linear = channels.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+  };
+  const background = luminance(getComputedStyle(selectedMenu).backgroundColor);
+  const regularItems = [...selectedMenu.querySelectorAll('button[role="menuitem"]')].slice(0, -1);
+  check(regularItems.every((item) => {
+    const foreground = luminance(getComputedStyle(item).color);
+    return (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05) >= 4.5;
+  }), 'selected prompt context actions are readable against the menu background');
+  await pressKey(regularItems[0], 'Escape');
+
   const row = folderSection('DUPLICATES').querySelector('[data-prompt-id="dup-2"]');
   const promptDrag = row.querySelector('[data-prompt-drag-handle]');
   const promptMenuTrigger = [...row.querySelectorAll('button')]
@@ -1150,6 +1166,15 @@ export async function runPromptContextChecks() {
 export async function runFixedShortcutChecks() {
   let assertions = 0;
   const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
+
+  const actionButtons = [...document.querySelectorAll('main button')];
+  const deleteButton = actionButtons.find((button) => button.textContent.trim() === '删除');
+  const saveButton = actionButtons.find((button) => button.textContent.trim() === '保存');
+  check(deleteButton.parentElement === saveButton.parentElement
+    && getComputedStyle(saveButton.parentElement).justifyContent === 'flex-end',
+  'delete and save are grouped on the right side of the editor');
+  check(deleteButton.title.includes('Delete') && saveButton.title.includes('Ctrl+S'),
+    'hovering the editor actions reveals their keyboard shortcuts');
 
   const body = document.querySelector('main textarea');
   const initiallySelectedRow = document.querySelector('[data-prompt-id].bg-blue-500');

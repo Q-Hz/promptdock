@@ -13,7 +13,7 @@ import { dragPayload, endDrag, type DropPosition, type DropTarget } from "../lib
 import { t, translateApiError } from "../lib/i18n";
 import { isDirty as computeDirty, snapshotFromPrompt, type EditorSnapshot } from "../lib/unsaved";
 import { confirmDialog, openDiscardDialog, openUnsavedDialog } from "../lib/confirm-dialog";
-import { matchesKeybinding } from "../lib/keybindings";
+import { formatKeybinding, matchesKeybinding } from "../lib/keybindings";
 import SettingsModal from "./SettingsModal.vue";
 import InterfaceTour from "./InterfaceTour.vue";
 import VariableExamplesModal from "./VariableExamplesModal.vue";
@@ -1499,14 +1499,18 @@ async function handleQuitRequest() {
                 </ResizableSplit>
               </div>
 
-              <div class="flex shrink-0 items-center justify-between gap-2">
+              <div class="flex shrink-0 items-center justify-end gap-2">
                 <button
                   v-if="selectedId"
                   class="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/30"
+                  :title="t('deleteShortcutHint', { shortcut: formatKeybinding('delete') })"
                   @click="remove"
                 >{{ t("delete") }}</button>
-                <span v-else />
-                <button class="rounded-md bg-blue-500 px-5 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="save">{{ t("save") }}</button>
+                <button
+                  class="rounded-md bg-blue-500 px-5 py-1.5 text-sm font-medium text-white hover:bg-blue-600"
+                  :title="t('saveShortcutHint', { shortcut: formatKeybinding('cmdorctrl+s') })"
+                  @click="save"
+                >{{ t("save") }}</button>
               </div>
             </main>
           </template>

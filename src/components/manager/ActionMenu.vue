@@ -132,7 +132,7 @@ onUnmounted(() => {
       v-if="open"
       ref="popup"
       role="menu"
-      class="fixed z-40 w-52 rounded-md border border-neutral-300 bg-white p-1 shadow-lg dark:border-neutral-600 dark:bg-neutral-800"
+      class="fixed z-40 w-52 rounded-md border border-neutral-300 bg-white p-1 text-neutral-900 shadow-lg dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
       :style="{ top: `${position.top}px`, left: `${position.left}px`, maxHeight: position.maxHeight ? `${position.maxHeight}px` : undefined, overflowY: 'auto' }"
       @click.stop
       @pointerdown.stop
