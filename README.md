@@ -34,7 +34,7 @@ PromptDock keeps reusable prompts one shortcut away. Organize prompts locally, s
 - **Prompt management** — Create, edit, delete, group, tag, and favorite prompts in the manager window.
 - **Fast search** — Search prompt titles, tags, and folders; navigate results with the keyboard.
 - **Local storage** — No account, cloud service, or remote database is required.
-- **Import and export** — Import and export JSON.
+- **Import and export** — Import a single JSON file with the manager's Import button or by dropping it onto the manager, and export JSON.
 
 ## Installation
 

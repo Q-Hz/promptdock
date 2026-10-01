@@ -61,7 +61,6 @@ window.alert = (message) => { state.alerts.push(String(message)); };
     ask: async (message: string) => {
       state.questions.push(message);
       if (query.get("replace") === "1") return true;
-      if (state.questions.length === 1) return false; // Merge, not replace.
       state.awaitingAnswer = true;
       return new Promise<boolean>((resolve) => {
         settleAnswer = (answer) => { state.awaitingAnswer = false; resolve(answer); };
@@ -78,6 +77,16 @@ window.alert = (message) => { state.alerts.push(String(message)); };
       case "get_onboarding_status":
         return { shouldShow: false, hotkeyDisplay: "Ctrl+Shift+Space", hotkeyAvailable: true };
       case "complete_onboarding": return;
+      case "read_import_content": return JSON.stringify({ format: "promptdeck", version: 1, prompts: incoming });
+      case "validate_import_content": {
+        let document: { format?: string; version?: number; prompts?: Prompt[] };
+        try { document = JSON.parse(args.content); } catch { throw "import.invalid_json"; }
+        if (document.format !== "promptdeck" || document.version !== 1 || !Array.isArray(document.prompts)) {
+          throw "import.unsupported_format";
+        }
+        if (document.prompts.length === 0) throw "import.no_prompts";
+        return;
+      }
       case "import_prompts":
         records = clone(incoming);
         return { count: records.length, organizationAdjusted: query.get("warnings") === "1" };

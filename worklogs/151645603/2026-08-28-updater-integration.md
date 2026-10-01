@@ -4,6 +4,8 @@
 作者唯一标识：`github.com:151645603`（[按数字 ID 查询当前账号](https://api.github.com/user/151645603)）  
 归属依据：历史日志按本地相关提交作者补录，说明见 [作者标识规范](../README.md)。
 
+脱敏修订（2026-09-30）：修订者 GitHub 身份待确认；仅移除公开日志中的本地私钥位置和保护状态，保留原作者归属。
+
 ## 摘要与动机
 
 此前升级 PromptDock 必须先卸载再重装，流程繁琐。本次接入 Tauri 官方
@@ -37,9 +39,7 @@
 - **自动检查命中后用原生对话框确认**（tauri-plugin-dialog Rust API）：
   管理窗口未打开时也能提示；确认后再下载安装。
 - **重启用 tauri 核心 `AppHandle::restart()`**：无需 tauri-plugin-process。
-- **签名密钥对**：2026-08-28 生成，私钥
-  `C:\Users\ROG\.tauri\promptdock.key`（无密码，不在仓库内），公钥已写入
-  `tauri.conf.json`。
+- **签名密钥对**：2026-08-28 生成，公钥已写入 `tauri.conf.json`；私钥配置仅保留在本地私有发布资料中。
 - 数据结构兼容：`auto_check_update` 以 `"0"/"1"` 存于现有 `settings` 表，
   与 `autostart` 约定一致，无 schema 变更。
 
@@ -62,8 +62,7 @@
 - 当前 `@tauri-apps/cli` 2.11.x **只认 `TAURI_SIGNING_PRIVATE_KEY`（私钥内容）**，
   不认 `TAURI_SIGNING_PRIVATE_KEY_PATH`（文件路径）；后者会报
   "found public key but no private key"。
-- **必须**同时把 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 显式设为空字符串，
-  否则构建在"解密签名私钥"一步会交互式等待输入密码而卡死（看似无响应）。
+- 签名私钥的解锁配置仅保留在本地私有发布资料中。
 - 该 CLI 版本对 NSIS **直接给 `.exe` 签名**（产出 `.exe.sig`），不再生成
   `.nsis.zip`；更新器运行时对 zip / 裸 exe 两种格式都能自适应处理。
 - `profile.release` 开了 `lto` + `codegen-units = 1`，release 链接约 5 分钟，

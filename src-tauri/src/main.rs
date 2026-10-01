@@ -1631,16 +1631,29 @@ pub(crate) fn validate_import_document(
 }
 
 #[tauri::command]
+fn read_import_content(path: String) -> Result<String, String> {
+    let content = std::fs::read_to_string(path).map_err(|e| format!("import.read_failed:{e}"))?;
+    // Only return a recognized import document, not arbitrary readable file contents.
+    import_logic::parse_import_content(&content)?;
+    Ok(content)
+}
+
+#[tauri::command]
+fn validate_import_content(content: String) -> Result<(), String> {
+    import_logic::parse_import_content(&content).map(|_| ())
+}
+
+#[tauri::command]
 fn import_prompts(
     state: tauri::State<DbState>,
-    path: String,
+    content: String,
     replace: bool,
 ) -> Result<serde_json::Value, String> {
     // 追加导入已迁移到 precheck_import / commit_import，本命令仅保留覆盖模式（PRD 8.6）
     if !replace {
         return Err("import.append_removed".into());
     }
-    let file = import_logic::read_import_file(&path)?;
+    let file = import_logic::parse_import_content(&content)?;
     let mut conn = state.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM prompts", [])
@@ -1671,9 +1684,9 @@ fn import_prompts(
 #[tauri::command]
 fn precheck_import(
     state: tauri::State<DbState>,
-    path: String,
+    content: String,
 ) -> Result<import_logic::ImportPrecheck, String> {
-    let file = import_logic::read_import_file(&path)?;
+    let file = import_logic::parse_import_content(&content)?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let locals = read_prompts(&conn)?;
     Ok(import_logic::precheck(
@@ -1996,6 +2009,8 @@ pub fn run() {
             set_launcher_preview,
             open_manager,
             export_prompts,
+            read_import_content,
+            validate_import_content,
             import_prompts,
             precheck_import,
             precheck_import_snapshot,

@@ -41,6 +41,9 @@ export async function runImportFlowChecks(scenario = "normal") {
   };
 
   if (button("导入")) await click("导入");
+  await until(() => !!document.querySelector("[data-import-mode-dialog]"));
+  check(state.calls.some((c) => c.command === "validate_import_content"), "File was not validated before choosing a mode");
+  await click("追加");
   check(!document.body.textContent.includes("导入摘要"), "Summary UI remains");
 
   if (scenario === "initial-clear") {

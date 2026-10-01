@@ -10,6 +10,7 @@ import {
 } from "../lib/organization";
 import { LAYOUT_PREFS_KEY, defaultLayout, parseLayout, serializeLayout, type ManagerLayout } from "../lib/layout-prefs";
 import { dragPayload, endDrag, type DropPosition, type DropTarget } from "../lib/drag-state";
+import { dropFileError, isExternalFileDrag } from "../lib/import-drop";
 import { t, translateApiError } from "../lib/i18n";
 import { isDirty as computeDirty, snapshotFromPrompt, type EditorSnapshot } from "../lib/unsaved";
 import { confirmDialog, openDiscardDialog, openUnsavedDialog } from "../lib/confirm-dialog";
@@ -19,6 +20,7 @@ import InterfaceTour from "./InterfaceTour.vue";
 import VariableExamplesModal from "./VariableExamplesModal.vue";
 import ConfirmLeaveDialog from "./ConfirmLeaveDialog.vue";
 import ImportComparePage from "./import/ImportComparePage.vue";
+import ImportModeDialog from "./import/ImportModeDialog.vue";
 import ResizableSplit from "./import/ResizableSplit.vue";
 import FolderSection from "./manager/FolderSection.vue";
 import { selectedIdAfterImport } from "../lib/import-selection";
@@ -45,6 +47,12 @@ const editorShowVarHint = computed(() => parseVariables(editing.value.body));
 
 const importSession = ref<ImportPrecheck | null>(null);
 const importing = ref(false);
+const importEntryBusy = ref(false);
+const importModeOpen = ref(false);
+const dropHover = ref(false);
+let resolveImportMode: ((mode: "replace" | "merge" | null) => void) | null = null;
+let importFocusBeforeMode: HTMLElement | null = null;
+let dropHoverTimer: number | undefined;
 const saving = ref(false);
 const folderBusy = ref(false);
 const mutations = new MutationQueue();
@@ -776,6 +784,8 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  window.clearTimeout(dropHoverTimer);
+  settleImportMode(null);
   for (const unlisten of unlistenFns) unlisten();
   window.removeEventListener("beforeunload", handleBeforeUnload);
   window.removeEventListener("keydown", handleWindowKeydown);
@@ -984,44 +994,144 @@ async function doExport() {
 
 // ---- 导入流程（PRD 6–8）----
 
-// 导入前先处理未保存状态（PRD 9.8）
-async function doImport() {
-  const ok = await guardUnsaved(async () => {});
-  if (!ok) return;
-  const { open, ask } = (window as any).__TAURI__.dialog;
-  const path = await open({
-    filters: [{ name: "JSON", extensions: ["json"] }],
-    multiple: false,
-  });
-  if (!path) return;
-  const replace = await ask(t("importConfirmMessage"), {
-    title: t("importConfirmTitle"),
-    kind: "info",
-    okLabel: t("replace"),
-    cancelLabel: t("merge"),
-  });
-  if (replace) {
-    const confirmed = await ask(t("importReplaceConfirmMessage"), {
+type ImportSource = { kind: "path"; path: string } | { kind: "drop"; files: File[] };
+
+function canAcceptFileDrop(): boolean {
+  return managerReady.value && !importSession.value && !importing.value && !importEntryBusy.value
+    && !saving.value && !showSettings.value && !showVariableExamples.value
+    && !onboardingOpen.value && !confirmDialog.open;
+}
+
+function isFileDrag(event: DragEvent): boolean {
+  return isExternalFileDrag(Array.from(event.dataTransfer?.types ?? []), !!dragPayload.value);
+}
+
+function clearDropHover() {
+  dropHover.value = false;
+  window.clearTimeout(dropHoverTimer);
+  dropHoverTimer = undefined;
+}
+
+function onExternalDragOver(event: DragEvent) {
+  if (!isFileDrag(event)) return;
+  // Even while a modal is open, block the webview's default file navigation.
+  event.preventDefault();
+  // Folder rows otherwise set dropEffect=none for non-sorting drags.
+  event.stopPropagation();
+  if (!canAcceptFileDrop()) {
+    clearDropHover();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    return;
+  }
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+  dropHover.value = true;
+  window.clearTimeout(dropHoverTimer);
+  dropHoverTimer = window.setTimeout(clearDropHover, 400);
+}
+
+function onExternalDragLeave(event: DragEvent) {
+  if (!isFileDrag(event)) return;
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  if (event.clientX <= rect.left || event.clientX >= rect.right
+    || event.clientY <= rect.top || event.clientY >= rect.bottom) clearDropHover();
+}
+
+function onExternalDrop(event: DragEvent) {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  clearDropHover();
+  if (!canAcceptFileDrop()) return;
+  // DataTransfer.files is only reliable during drop; retain the File objects now.
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  void beginImport(async () => ({ kind: "drop", files }));
+}
+
+function chooseImportMode(): Promise<"replace" | "merge" | null> {
+  importFocusBeforeMode = document.activeElement as HTMLElement | null;
+  importModeOpen.value = true;
+  return new Promise((resolve) => { resolveImportMode = resolve; });
+}
+
+function settleImportMode(mode: "replace" | "merge" | null) {
+  importModeOpen.value = false;
+  const focusTarget = importFocusBeforeMode;
+  importFocusBeforeMode = null;
+  void nextTick(() => { if (focusTarget?.isConnected) focusTarget.focus(); });
+  const resolve = resolveImportMode;
+  resolveImportMode = null;
+  resolve?.(mode);
+}
+
+function reportFileError(error: "count" | "extension") {
+  alert(t(error === "count" ? "importOneJsonFile" : "importJsonOnly"));
+}
+
+async function readImportSource(source: ImportSource): Promise<string | null> {
+  if (source.kind === "path") {
+    const fileName = source.path.split(/[\\/]/).pop() ?? "";
+    const error = dropFileError([fileName]);
+    if (error) { reportFileError(error); return null; }
+    return api.readImportContent(source.path);
+  }
+  const error = dropFileError(source.files.map((file) => file.name));
+  if (error) { reportFileError(error); return null; }
+  try {
+    return await source.files[0].text();
+  } catch {
+    throw "import.read_failed:drop";
+  }
+}
+
+// Both entry points keep one validated content snapshot for the later import mode.
+async function beginImport(selectSource: () => Promise<ImportSource | null>) {
+  if (importEntryBusy.value || importing.value || importSession.value) return;
+  importEntryBusy.value = true;
+  try {
+    if (!(await guardUnsaved(async () => {}))) return;
+    const source = await selectSource();
+    if (!source) return;
+    const content = await readImportSource(source);
+    if (content === null) return;
+    await api.validateImportContent(content);
+    const mode = await chooseImportMode();
+    if (mode === null) return;
+    if (mode === "merge") {
+      await startAppendImport(content);
+      return;
+    }
+    const confirmed = await (window as any).__TAURI__.dialog.ask(t("importReplaceConfirmMessage"), {
       title: t("importConfirmTitle"),
       kind: "warning",
       okLabel: t("replace"),
       cancelLabel: t("cancel"),
     });
     if (!confirmed) return;
+    importing.value = true;
     try {
-      importing.value = true;
-      const result = await api.importPrompts(path as string, true);
+      const result = await api.importPrompts(content, true);
       await reload();
       await resyncEditor();
       alert(t("importSuccess", { count: result.count }) + (result.organizationAdjusted ? `\n${t("importOrganizationAdjusted")}` : ""));
-    } catch (error) {
-      alert(t("operationFailed", { error: translateApiError(error) }));
     } finally {
       importing.value = false;
     }
-    return;
+  } catch (error) {
+    alert(t("operationFailed", { error: translateApiError(error) }));
+  } finally {
+    importEntryBusy.value = false;
   }
-  await startAppendImport(path as string);
+}
+
+// 导入前先处理未保存状态（PRD 9.8），再打开文件选择器。
+function doImport() {
+  void beginImport(async () => {
+    const path = await (window as any).__TAURI__.dialog.open({
+      filters: [{ name: "JSON", extensions: ["json"] }],
+      multiple: false,
+    });
+    return typeof path === "string" ? { kind: "path", path } : null;
+  });
 }
 
 // 导入后按最新数据库版本刷新编辑区（PRD 8.3.6）
@@ -1036,10 +1146,10 @@ async function resyncEditor() {
   }
 }
 
-async function startAppendImport(path: string) {
+async function startAppendImport(content: string) {
   let precheck: ImportPrecheck;
   try {
-    precheck = await api.precheckImport(path);
+    precheck = await api.precheckImport(content);
   } catch (error) {
     alert(t("operationFailed", { error: translateApiError(error) }));
     return;
@@ -1113,7 +1223,7 @@ function onImportConfirm(decisions: ImportDecision[]) {
 
 async function resolveLeave(): Promise<boolean> {
   // A commit cannot be cancelled once dispatched; wait until it settles.
-  if (importing.value) return false;
+  if (importing.value || importEntryBusy.value) return false;
   await mutations.idle();
   const lastFocused = document.activeElement as HTMLElement | null;
   // 比较页激活时，关闭窗口执行取消导入语义（PRD 9.7 末段）
@@ -1146,7 +1256,7 @@ async function resolveLeave(): Promise<boolean> {
 }
 
 function handleBeforeUnload(event: BeforeUnloadEvent) {
-  if (!allowNextUnload && (isDirty.value || importSession.value || importing.value)) {
+  if (!allowNextUnload && (isDirty.value || importSession.value || importing.value || importEntryBusy.value)) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -1167,6 +1277,7 @@ async function handleWindowKeydown(event: KeyboardEvent) {
   const shortcutBlocked = !managerReady.value
     || !!importSession.value
     || importing.value
+    || importEntryBusy.value
     || showSettings.value
     || onboardingOpen.value
     || showVariableExamples.value
@@ -1237,7 +1348,14 @@ async function handleQuitRequest() {
 </script>
 
 <template>
-  <div data-manager-shell class="relative h-full overflow-hidden">
+  <div
+    data-manager-shell
+    class="relative h-full overflow-hidden"
+    @dragenter.capture="onExternalDragOver"
+    @dragover.capture="onExternalDragOver"
+    @dragleave.capture="onExternalDragLeave"
+    @drop.capture="onExternalDrop"
+  >
     <div v-if="!managerReady" class="flex h-full items-center justify-center" role="status">
       <div class="text-center">
         <div class="mx-auto mb-3 h-8 w-8 animate-pulse rounded-xl bg-blue-500" aria-hidden="true" />
@@ -1248,8 +1366,8 @@ async function handleQuitRequest() {
       v-else
       class="flex h-full flex-col"
       :aria-busy="importing || saving"
-      :inert="saving || (importing && !importSession) || onboardingOpen || showVariableExamples ? true : undefined"
-      :aria-hidden="onboardingOpen || showVariableExamples ? 'true' : undefined"
+      :inert="saving || (importing && !importSession) || onboardingOpen || showVariableExamples || importModeOpen ? true : undefined"
+      :aria-hidden="onboardingOpen || showVariableExamples || importModeOpen ? 'true' : undefined"
     >
     <!-- 导入冲突在本页处理并直接确认，不再经过摘要页。 -->
     <template v-if="importSession">
@@ -1536,5 +1654,21 @@ async function handleQuitRequest() {
       @finish="dismissOnboarding('finish')"
     />
     <VariableExamplesModal v-if="managerReady && showVariableExamples" @close="closeVariableExamples" />
+    <ImportModeDialog
+      v-if="importModeOpen"
+      @choose="settleImportMode"
+      @cancel="settleImportMode(null)"
+    />
+    <div
+      v-if="dropHover"
+      data-import-drop-overlay
+      class="pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-4 border-blue-500 bg-blue-500/15"
+      role="status"
+    >
+      <div class="rounded-xl border border-blue-300 bg-white px-8 py-6 text-center shadow-xl dark:border-blue-700 dark:bg-neutral-800">
+        <p class="text-base font-semibold text-blue-700 dark:text-blue-300">{{ t("dropJsonToImport") }}</p>
+        <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{{ t("importOneJsonFile") }}</p>
+      </div>
+    </div>
   </div>
 </template>

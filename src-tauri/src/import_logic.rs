@@ -145,8 +145,7 @@ pub fn precheck(
     }
 }
 
-pub fn read_import_file(path: &str) -> Result<ImportFile, String> {
-    let content = std::fs::read_to_string(path).map_err(|e| format!("import.read_failed:{e}"))?;
+pub fn parse_import_content(content: &str) -> Result<ImportFile, String> {
     let data: serde_json::Value =
         serde_json::from_str(&content).map_err(|_| "import.invalid_json".to_string())?;
     let (prompts, organization) = crate::validate_import_document(&data)?;
@@ -557,23 +556,28 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_ids_in_file_are_rejected() {
-        let mut dir = std::env::temp_dir();
-        dir.push("promptdock-import-dup-test.json");
-        let doc = serde_json::json!({
+    fn content_parser_uses_the_same_document_validation_as_file_import() {
+        let document = serde_json::json!({
             "format": "promptdeck",
             "version": 1,
-            "prompts": [
-                prompt("dup", "A", "x"),
-                prompt("dup", "B", "y"),
-            ]
+            "prompts": [prompt("one", "A", "body")]
         });
-        std::fs::write(&dir, serde_json::to_string(&doc).unwrap()).unwrap();
+        let content = serde_json::to_string(&document).unwrap();
+        assert_eq!(parse_import_content(&content).unwrap().prompts.len(), 1);
         assert_eq!(
-            read_import_file(dir.to_str().unwrap()).unwrap_err(),
+            parse_import_content("not json").unwrap_err(),
+            "import.invalid_json"
+        );
+
+        let duplicate = serde_json::json!({
+            "format": "promptdeck",
+            "version": 1,
+            "prompts": [prompt("one", "A", "body"), prompt("one", "B", "body")]
+        });
+        assert_eq!(
+            parse_import_content(&duplicate.to_string()).unwrap_err(),
             "import.duplicate_id"
         );
-        let _ = std::fs::remove_file(&dir);
     }
 
     #[test]

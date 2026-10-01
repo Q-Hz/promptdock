@@ -140,11 +140,13 @@ export const api = {
   setLauncherPreview: (open: boolean): Promise<void> => invoke("set_launcher_preview", { open }),
   openManager: (): Promise<void> => invoke("open_manager"),
   exportPrompts: (path: string): Promise<void> => invoke("export_prompts", { path }),
-  // 覆盖模式导入：清空当前全部 Prompt 后导入文件内容与规范化顺序
-  importPrompts: (path: string, replace: true): Promise<{ count: number; organizationAdjusted: boolean }> =>
-    invoke("import_prompts", { path, replace }),
-  precheckImport: (path: string): Promise<ImportPrecheck> =>
-    invoke("precheck_import", { path }),
+  readImportContent: (path: string): Promise<string> => invoke("read_import_content", { path }),
+  validateImportContent: (content: string): Promise<void> => invoke("validate_import_content", { content }),
+  // 两种导入方式都使用已读取的内容快照；Rust 提交前会再次执行完整校验。
+  importPrompts: (content: string, replace: true): Promise<{ count: number; organizationAdjusted: boolean }> =>
+    invoke("import_prompts", { content, replace }),
+  precheckImport: (content: string): Promise<ImportPrecheck> =>
+    invoke("precheck_import", { content }),
   // stale 后基于首次读取的内存快照重新预检查，不重新读取磁盘文件
   precheckImportSnapshot: (
     prompts: Prompt[],
