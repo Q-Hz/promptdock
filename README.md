@@ -36,7 +36,7 @@ PromptDock keeps reusable prompts one shortcut away. Organize prompts locally, s
 - **Local storage** — No account, cloud service, or remote database is required.
 - **Import and export** — Import a single JSON file with the manager's Import button or by dropping it onto the manager, and export JSON.
 
-## Installation
+## Installation and usage
 
 ### System requirements
 
@@ -94,9 +94,19 @@ Open the manager from the tray menu to create, edit, and delete prompts, and org
 
 Click **New** to add a prompt: enter a title and content, optionally set tags, a folder, and favorite status, and use variable syntax in the content.
 
-![Manager: creating a prompt](README_attachment/en/manager-create-en.png)
+### 4. Prompt import
 
-#### Variable syntax
+You can directly drag in a JSON file to import prompts.
+
+![Manager: prompt import](README_attachment/en/import-prompt-en.png)
+
+### 5. Settings
+
+The global shortcut, theme (light/dark), interface language, launch-at-startup behavior, and app updates can all be adjusted in the settings view.
+
+![Settings](README_attachment/en/settings-en.png)
+
+## Variable syntax
 
 Declare variables in the prompt content with double curly braces `{{ }}`; the launcher renders a form for them when the prompt is used:
 
@@ -105,19 +115,9 @@ Declare variables in the prompt content with double curly braces `{{ }}`; the la
 - **Single choice** — `{{note_language=[answer in Chinese|answer in English]}}`: candidates are separated by `|` inside the brackets and picked from a dropdown.
 - **Multi-select** — `{{tone+=[formal|polite|friendly]}}`: pick multiple values via checkboxes; selected values are joined by `, ` by default, and you can use `~` to choose a custom separator (supports `\n` and `\t` escapes), e.g. `{{lines+=[a|b|c]~\n}}` puts each value on its own line.
 
-#### Write prompts faster with Prompt Standardization
+### Write prompts faster with Prompt Standardization
 
-PromptDock ships with a built-in template named **Prompt Standardization**. If you are not familiar with the variable syntax yet, use it: paste one of your everyday prompts, send it to the AI, and it will be rewritten into a well-formed prompt that follows PromptDock's variable syntax. Save the result as a new prompt and you are done.
-
-### 4. Settings
-
-The global shortcut, theme (light/dark), interface language, launch-at-startup behavior, and app updates can all be adjusted in the settings view.
-
-![Settings](README_attachment/en/settings-en.png)
-
-## Improve prompts with AI
-
-If you already have prompts that you use regularly, you can refine them with the built-in **提示词标准化 (Prompt Standardization)** template:
+PromptDock ships with a built-in template named **提示词标准化 (Prompt Standardization)**. Paste one of your everyday prompts into it and send it to an AI assistant. The assistant will rewrite it into a well-formed prompt that follows PromptDock's variable syntax. Save the result as a new prompt.
 
 1. Open **提示词标准化 (Prompt Standardization)** and enter the original prompt you want to improve.
 2. Ask an AI assistant to rewrite it into a clearer, more consistent prompt based on your requirements.
