@@ -1,3 +1,4 @@
+import { openContextMenu, startHoldDrag } from './hold-drag-helpers.js';
 // Regression probes promoted from the independent acceptance review.
 // Open manager-layout.html?fresh=1 before each probe unless its precondition says otherwise.
 // These call real Vue DOM handlers; native WebView2 drag interception is a separate gate.
@@ -12,7 +13,7 @@ export async function selfDrop() {
   const source = row('note-02');
   const transfer = new DataTransfer();
   const box = source.getBoundingClientRect();
-  source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }));
+  await startHoldDrag(source);
   source.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer, clientY: box.top + 2 }));
   await tick();
   source.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer, clientY: box.top + 2 }));
@@ -56,7 +57,7 @@ export async function delayedPinThenSave() {
 }
 
 export async function pickerScroll() {
-  row('note-01').querySelector('button[aria-label="Prompt 操作"]').click();
+  openContextMenu(row('note-01'));
   await tick();
   clickText(document.querySelector('[role="menu"]'), '移动到文件夹');
   await tick();
@@ -74,7 +75,7 @@ export async function bottomMenu() {
   const nav = document.querySelector('aside > div:last-child');
   target.scrollIntoView({ block: 'end' });
   await tick();
-  target.querySelector('button[aria-label="Prompt 操作"]').click();
+  openContextMenu(target);
   await tick();
   const popup = document.querySelector('[role="menu"]');
   const box = popup.getBoundingClientRect();
@@ -136,7 +137,7 @@ export async function staleOrderPreservesDraft() {
   const newOrder = [...expected.promptOrderByFolder['Note organization']].reverse();
   await window.__TAURI__.core.invoke('set_prompt_order', { folder: 'Note organization', order: newOrder, expected });
   // The Vue list is deliberately stale, like a second window's list.
-  row('note-01').querySelector('button[aria-label="Prompt 操作"]').click();
+  openContextMenu(row('note-01'));
   await tick();
   clickText(document.querySelector('[role="menu"]'), '下移');
   await tick();
@@ -171,7 +172,7 @@ export async function dragAutoScrollAndCancel() {
   const nav = document.querySelector('[data-manager-navigation]');
   const before = JSON.stringify(window.managerFixture.organization());
   const transfer = new DataTransfer();
-  source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }));
+  await startHoldDrag(source);
   const rect = nav.getBoundingClientRect();
   nav.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer, clientX: rect.left + 10, clientY: rect.bottom - 5 }));
   await new Promise(resolve => setTimeout(resolve, 220));
@@ -189,7 +190,7 @@ export async function immediateEnterDrop() {
   const target = section('Writing').querySelector('header');
   const rect = target.getBoundingClientRect();
   const transfer = new DataTransfer();
-  source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: transfer }));
+  await startHoldDrag(source);
   target.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: transfer, clientX: rect.left + 20, clientY: rect.top + 10 }));
   // Release immediately, before a subsequent dragover arrives.
   target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer, clientX: rect.left + 20, clientY: rect.top + 10 }));

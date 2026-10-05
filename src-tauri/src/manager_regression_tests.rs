@@ -37,7 +37,8 @@ fn snapshot(conn: &Connection) -> serde_json::Value {
     serde_json::json!({
         "prompts": prompts,
         "folders": read_folders(conn).unwrap(),
-        "organization": load_organization(conn).unwrap()
+        "organization": load_organization(conn).unwrap(),
+        "folderAppearance": folder_appearance::read(conn).unwrap()
     })
 }
 
@@ -47,6 +48,31 @@ fn fail_order_writes(conn: &Connection) {
         BEGIN SELECT RAISE(ABORT, 'injected order failure'); END;",
     )
     .unwrap();
+}
+
+#[test]
+fn folder_icons_follow_atomic_crud_and_recreation_defaults() {
+    let mut conn = fixture();
+    let value = folder_appearance::Appearance {
+        icon: "book".into(),
+        color: "#9146ff".into(),
+    };
+    folder_appearance::write(&conn, "A", &value).unwrap();
+    let expected = read_organization(&conn, &read_prompts(&conn).unwrap()).unwrap();
+    let before = snapshot(&conn);
+    fail_order_writes(&conn);
+    assert!(rename_folder_impl(&mut conn, "A", "Renamed", &expected).is_err());
+    assert_eq!(snapshot(&conn), before);
+    assert!(delete_folder_impl(&mut conn, "A", &expected).is_err());
+    assert_eq!(snapshot(&conn), before);
+    conn.execute_batch("DROP TRIGGER fail_order").unwrap();
+    let renamed = rename_folder_impl(&mut conn, "A", "Renamed", &expected).unwrap();
+    assert_eq!(renamed.folder_appearance["Renamed"], value);
+    assert!(!renamed.folder_appearance.contains_key("A"));
+    let deleted = delete_folder_impl(&mut conn, "Renamed", &renamed.organization).unwrap();
+    assert!(!deleted.folder_appearance.contains_key("Renamed"));
+    let recreated = create_folder_impl(&mut conn, "Renamed", &deleted.organization).unwrap();
+    assert!(!recreated.folder_appearance.contains_key("Renamed"));
 }
 
 #[test]

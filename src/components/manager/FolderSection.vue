@@ -5,17 +5,22 @@ import type { Prompt } from "../../lib/api";
 import { t } from "../../lib/i18n";
 import { batchView, PINNED_SECTION_KEY } from "../../lib/organization";
 import { folderViewportBounds } from "../../lib/split-pane";
+import { holdDragReady } from "../../lib/hold-drag";
 import {
-  beginDrag, dragPayload, DRAG_MIME, endDrag,
+  beginDrag, dragPayload, endDrag,
   type DropPosition, type DropTarget,
+  type DragPayload,
 } from "../../lib/drag-state";
 import ActionMenu from "./ActionMenu.vue";
+import FolderIcon from "./FolderIcon.vue";
+import { defaultAppearance, type FolderAppearance } from "../../lib/folder-appearance";
 
 // 左侧一个分区：置顶区或一个文件夹。承载折叠、分批显示、受限高度、拖动落点与行内菜单。
 const props = defineProps<{
   sectionKey: string;
   variant: "folder" | "pinned";
   title: string;
+  appearance?: FolderAppearance;
   items: Prompt[];
   total: number;
   selectedId: string | null;
@@ -37,7 +42,7 @@ const emit = defineEmits<{
   showMore: [];
   collapseList: [];
   drop: [target: DropTarget];
-  folderAction: [action: "up" | "down" | "rename" | "delete"];
+  folderAction: [action: "up" | "down" | "rename" | "delete" | "icon"];
   updateRename: [value: string];
   commitRename: [];
   cancelRename: [];
@@ -57,12 +62,101 @@ const tempExpanded = ref(false);
 const picker = ref<{ prompt: Prompt; top: number; left: number } | null>(null);
 const pickerFilter = ref("");
 let hoverTimer: number | undefined;
+let press: { pointerId: number; startedAt: number; x: number; y: number; payload: DragPayload; dragging: boolean } | null = null;
+let suppressClick = false;
+
+function onPress(event: PointerEvent, prompt?: Prompt) {
+  if ((event.target as Element).closest('[role="menu"], [data-folder-picker], input')) return;
+  suppressClick = false;
+  if (event.button !== 0 || !sortable.value || (!prompt && (isPinnedSection.value || props.renaming))) return;
+  cancelPress();
+  press = {
+    pointerId: event.pointerId, startedAt: performance.now(), x: event.clientX, y: event.clientY,
+    payload: { kind: prompt ? "prompt" : "folder", id: prompt?.id ?? props.sectionKey, sectionKey: props.sectionKey },
+    dragging: false,
+  };
+  document.addEventListener("pointermove", onPressMove, true);
+  document.addEventListener("pointerup", onPressUp, true);
+  document.addEventListener("pointercancel", cancelPress, true);
+  document.addEventListener("keydown", onPressKeydown, true);
+  window.addEventListener("blur", cancelPress);
+}
+
+function dragTargetAt(event: PointerEvent) {
+  return document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-prompt-id], section[data-section-key] > header") ?? null;
+}
+
+function onPressMove(event: PointerEvent) {
+  if (!press || event.pointerId !== press.pointerId) return;
+  if (!(event.buttons & 1) || !sortable.value || props.renaming) { cancelPress(); return; }
+  if (!press.dragging) {
+    if (!holdDragReady(press.startedAt, performance.now(), event.clientX, event.clientY, press.x, press.y)) return;
+    press.dragging = true;
+    suppressClick = true;
+    folderMenu.value?.close();
+    promptMenus.forEach((menu) => menu.close());
+    closePicker();
+    beginDrag(press.payload);
+  }
+  event.preventDefault();
+  // Reuse the existing validated drop zones and shared edge scrolling.
+  document.querySelectorAll<HTMLElement>("[data-row-drag-over]").forEach((element) => {
+    if (element !== dragTargetAt(event)) {
+      element.dispatchEvent(new DragEvent("dragleave", { bubbles: true }));
+      element.removeAttribute("data-row-drag-over");
+    }
+  });
+  const target = dragTargetAt(event);
+  if (target) {
+    target.setAttribute("data-row-drag-over", "");
+  }
+  (target ?? document.elementFromPoint(event.clientX, event.clientY) ?? document)
+    .dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }));
+}
+
+function onPressUp(event: PointerEvent) {
+  if (!press || event.pointerId !== press.pointerId) return;
+  if (press.dragging) {
+    event.preventDefault();
+    // Refresh the position at release so a stale indicator cannot commit a move.
+    onPressMove(new PointerEvent("pointermove", { pointerId: event.pointerId, buttons: 1, clientX: event.clientX, clientY: event.clientY }));
+    dragTargetAt(event)?.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }));
+  }
+  cancelPress();
+}
+
+function onPressKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") cancelPress();
+}
+
+function cancelPress() {
+  const dragging = press?.dragging;
+  press = null;
+  document.removeEventListener("pointermove", onPressMove, true);
+  document.removeEventListener("pointerup", onPressUp, true);
+  document.removeEventListener("pointercancel", cancelPress, true);
+  document.removeEventListener("keydown", onPressKeydown, true);
+  window.removeEventListener("blur", cancelPress);
+  document.querySelectorAll("[data-row-drag-over]").forEach((element) => element.removeAttribute("data-row-drag-over"));
+  if (dragging) endDrag();
+}
+
+function onClickCapture(event: MouseEvent) {
+  if (suppressClick && event.detail !== 0) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+}
 
 const isPinnedSection = computed(() => props.variant === "pinned");
 const isSystemSection = computed(() => isPinnedSection.value || props.sectionKey === "");
 
 // 拖动排序在非空搜索时禁用，避免在不完整列表上误排（PRD 4.3）
 const sortable = computed(() => !props.searching);
+function isDragSource(kind: "prompt" | "folder", id: string) {
+  const drag = dragPayload.value;
+  return drag?.kind === kind && drag.id === id && drag.sectionKey === props.sectionKey;
+}
 
 const promptDropAllowed = computed(() => {
   const drag = dragPayload.value;
@@ -101,6 +195,10 @@ const folderMenuItems = computed(() => [
   { id: "rename", label: t("renameFolder") },
   { id: "delete", label: t("deleteFolder"), danger: true },
 ]);
+const sectionMenuItems = computed(() => [
+  ...(isPinnedSection.value ? [] : isSystemSection.value ? folderMenuItems.value.slice(0, 2) : folderMenuItems.value),
+  { id: "icon", label: t("changeFolderIcon"), separatorBefore: !isPinnedSection.value },
+]);
 
 watch(() => props.renaming, async (renaming) => {
   if (!renaming) return;
@@ -116,13 +214,14 @@ watch(() => props.renameError, async (error) => {
 });
 
 function onFolderMenu(action: string) {
-  emit("folderAction", action as "up" | "down" | "rename" | "delete");
+  emit("folderAction", action as "up" | "down" | "rename" | "delete" | "icon");
 }
 
 function onHeaderContextMenu(event: MouseEvent) {
-  if (isSystemSection.value || props.renaming) return;
+  if (props.renaming) return;
+  cancelPress();
   event.preventDefault();
-  folderMenu.value?.openAt(event.clientX, event.clientY);
+  folderMenu.value?.openAt(event.clientX, event.clientY, (event.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-folder-title]") ?? undefined);
 }
 
 function onFolderTitleKeydown(event: KeyboardEvent) {
@@ -138,8 +237,9 @@ function setPromptMenuRef(id: string, value: unknown) {
 }
 
 function onPromptContextMenu(event: MouseEvent, prompt: Prompt) {
+  cancelPress();
   event.preventDefault();
-  promptMenus.get(prompt.id)?.openAt(event.clientX, event.clientY);
+  promptMenus.get(prompt.id)?.openAt(event.clientX, event.clientY, (event.currentTarget as HTMLElement).querySelector<HTMLElement>("button") ?? undefined);
 }
 
 type MenuItem = {
@@ -238,36 +338,22 @@ function clearTempExpand() {
 // 拖动结束后清理本分区的全部落点反馈
 watch(dragPayload, (value) => {
   if (value) return;
+  if (press?.dragging) cancelPress();
   rowIndicator.value = null;
   headerIndicator.value = null;
   clearTempExpand();
-});
+}, { flush: "sync" });
+
+watch(() => [props.searching, props.renaming], () => cancelPress());
 
 onUnmounted(() => {
+  cancelPress();
   clearTempExpand();
   closePicker();
   document.removeEventListener("pointerdown", onOutsidePointerDown, true);
   window.removeEventListener("scroll", closeAll, true);
   window.removeEventListener("resize", closePicker);
 });
-
-function onRowDragStart(event: DragEvent, prompt: Prompt) {
-  if (!sortable.value) {
-    event.preventDefault();
-    return;
-  }
-  beginDrag({ kind: "prompt", id: prompt.id, sectionKey: props.sectionKey });
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData(DRAG_MIME, prompt.id);
-    event.dataTransfer.setData("text/plain", prompt.title);
-  }
-}
-
-function onRowDragEnd() {
-  rowIndicator.value = null;
-  endDrag();
-}
 
 function onRowDragOver(event: DragEvent, prompt: Prompt) {
   if (dragPayload.value?.id === prompt.id) {
@@ -300,18 +386,6 @@ function onRowDrop(event: DragEvent, prompt: Prompt) {
   });
 }
 
-function onFolderDragStart(event: DragEvent) {
-  if (!sortable.value || isPinnedSection.value) {
-    event.preventDefault();
-    return;
-  }
-  beginDrag({ kind: "folder", id: props.sectionKey, sectionKey: props.sectionKey });
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData(DRAG_MIME, props.sectionKey);
-  }
-}
-
 function scheduleTempExpand() {
   if (!props.collapsed || tempExpanded.value || hoverTimer !== undefined) return;
   hoverTimer = window.setTimeout(() => {
@@ -341,6 +415,7 @@ function onHeaderDragOver(event: DragEvent) {
 }
 
 function onHeaderDragLeave() {
+  headerIndicator.value = null;
   window.clearTimeout(hoverTimer);
   hoverTimer = undefined;
 }
@@ -380,7 +455,13 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
   <section ref="section" class="group/section mb-1" :data-section-key="sectionKey" :data-section-variant="variant">
 
     <header
-      class="group flex items-center gap-1 rounded-md px-1 py-1"
+      class="group flex select-none items-center gap-1 rounded-md px-1 py-1"
+      :draggable="false"
+      :data-hold-draggable="sortable && !isPinnedSection && !renaming"
+      :data-row-drag-source="isDragSource('folder', sectionKey)"
+      @pointerdown="onPress($event)"
+      @click.capture="onClickCapture"
+      @dragstart.prevent
       :style="{ boxShadow: headerIndicator === 'before' ? 'inset 0 2px #3b82f6' : headerIndicator === 'after' ? 'inset 0 -2px #3b82f6' : undefined }"
       :class="headerIndicator === 'end'
         ? 'bg-blue-100 dark:bg-blue-900/40'
@@ -402,14 +483,14 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
         @click="emit('toggleCollapsed')"
         @keydown="onFolderTitleKeydown"
       >
-        <span class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-base leading-none text-neutral-400" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
-        <span class="truncate text-[12px] font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400" :title="title">
+        <FolderIcon :appearance="appearance ?? defaultAppearance(sectionKey)" :expanded="expanded" />
+        <span class="truncate text-[13px] font-normal text-neutral-700 dark:text-neutral-200" :title="title">
           {{ title }}
         </span>
         <span class="ml-auto shrink-0 text-[10px] tabular-nums text-neutral-400">{{ countLabel }}</span>
       </button>
       <div v-else class="flex min-w-0 flex-1 items-center gap-1">
-        <span class="inline-flex h-4 w-4 shrink-0 items-center justify-center text-base leading-none text-neutral-400" aria-hidden="true">{{ expanded ? "▾" : "▸" }}</span>
+        <FolderIcon :appearance="appearance ?? defaultAppearance(sectionKey)" :expanded="expanded" />
         <div class="min-w-0 flex-1">
           <input
             ref="renameInput"
@@ -429,34 +510,13 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
         </div>
       </div>
 
-      <span class="flex w-14 shrink-0 items-center justify-end gap-1">
-        <template v-if="!isPinnedSection && !renaming">
-          <span
-            data-folder-drag-handle
-            class="inline-flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-[11px] text-neutral-300 opacity-0 transition-colors transition-opacity hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-100 dark:text-neutral-500 dark:hover:bg-neutral-700 dark:hover:text-neutral-300"
-            :draggable="sortable"
-            :title="t('dragFolderHandle')"
-            :aria-label="t('dragFolderHandle')"
-            role="button"
-            tabindex="-1"
-            @dragstart="onFolderDragStart"
-            @dragend="clearTempExpand(); headerIndicator = null; endDrag()"
-          >⠿</span>
-          <ActionMenu
-            v-if="!isSystemSection"
-            ref="folderMenu"
-            :label="t('folderActions')"
-            :items="folderMenuItems"
-            @select="onFolderMenu"
-          />
-          <ActionMenu
-            v-else
-            :label="t('folderActions')"
-            :items="folderMenuItems.slice(0, 2)"
-            @select="onFolderMenu"
-          />
-        </template>
-      </span>
+      <ActionMenu
+        v-if="!renaming"
+        ref="folderMenu"
+        :label="t('folderActions')"
+        :items="sectionMenuItems"
+        @select="onFolderMenu"
+      />
     </header>
 
 
@@ -468,7 +528,14 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
       >
         <template v-for="prompt in visibleItems" :key="prompt.id">
           <div
-            class="group flex items-center gap-1 rounded-md pl-5 pr-1"
+            class="group flex select-none items-center gap-1 rounded-md pl-5 pr-1"
+            :draggable="false"
+            :data-hold-draggable="sortable"
+            :data-row-drag-source="isDragSource('prompt', prompt.id)"
+            @pointerdown="onPress($event, prompt)"
+            @click.capture="onClickCapture"
+            @dragstart.prevent
+            @dragleave="rowIndicator = null"
             :style="{ boxShadow: rowIndicator?.id === prompt.id ? (rowIndicator.position === 'before' ? 'inset 0 2px #3b82f6' : 'inset 0 -2px #3b82f6') : undefined }"
             :class="prompt.id === selectedId ? 'bg-blue-500 text-white' : 'hover:bg-neutral-100 dark:hover:bg-neutral-700'"
             :data-prompt-id="prompt.id"
@@ -491,17 +558,6 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
                 {{ isPinnedSection ? (prompt.folder || t("uncategorizedSystem")) : prompt.tags.join("·") }}
               </span>
             </button>
-            <span
-              data-prompt-drag-handle
-              class="inline-flex h-6 w-6 shrink-0 cursor-grab items-center justify-center rounded text-[11px] opacity-0 transition-colors transition-opacity hover:bg-neutral-200 hover:text-neutral-600 group-hover:opacity-70 group-focus-within:opacity-70 dark:hover:bg-neutral-600 dark:hover:text-neutral-200"
-              :draggable="sortable"
-              :title="sortable ? t('dragPromptHandle') : t('searchSortDisabled')"
-              :aria-label="sortable ? t('dragPromptHandle') : t('searchSortDisabled')"
-              role="button"
-              tabindex="-1"
-              @dragstart.stop="onRowDragStart($event, prompt)"
-              @dragend.stop="onRowDragEnd"
-            >⠿</span>
             <ActionMenu
               :ref="(value) => setPromptMenuRef(prompt.id, value)"
               :label="t('promptActions')"
@@ -512,17 +568,17 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
         </template>
       </div>
 
-      <div v-if="batch.remaining > 0 || batch.canCollapse" class="flex flex-col items-center gap-0.5 px-1 py-1">
+      <div v-if="batch.remaining > 0 || batch.canCollapse" class="flex items-center gap-3 pl-[22px] pr-1 py-1">
         <button
           v-if="batch.remaining > 0"
           type="button"
-          class="rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+          class="rounded py-0.5 text-[13px] text-neutral-400 hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-neutral-500 dark:hover:text-neutral-200"
           @click="emit('showMore')"
         >{{ t("showMore") }}</button>
         <button
           v-if="batch.canCollapse"
           type="button"
-          class="rounded px-1.5 py-0.5 text-[11px] text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700"
+          class="rounded py-0.5 text-[13px] text-neutral-400 hover:text-neutral-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:text-neutral-500 dark:hover:text-neutral-200"
           @click="onCollapseList"
         >{{ t("collapseList") }}</button>
       </div>
@@ -564,3 +620,12 @@ function onRowKeydown(event: KeyboardEvent, prompt: Prompt) {
     </div>
   </section>
 </template>
+
+<style scoped>
+[data-row-drag-source="true"] {
+  opacity: 0.6;
+}
+:global(body:has([data-row-drag-source="true"]) *) {
+  cursor: grabbing !important;
+}
+</style>

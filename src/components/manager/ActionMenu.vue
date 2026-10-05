@@ -20,10 +20,14 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ select: [id: string] }>();
 
 const open = ref(false);
-const trigger = ref<HTMLButtonElement | null>(null);
 const filter = ref("");
 const position = ref({ top: 0, left: 0, maxHeight: 0 });
 const contextPoint = ref<{ x: number; y: number } | null>(null);
+let contextOrigin: HTMLElement | null = null;
+
+function restoreFocus() {
+  contextOrigin?.focus({ preventScroll: true });
+}
 
 const visible = computed(() => {
   const query = filter.value.trim().toLowerCase();
@@ -34,26 +38,15 @@ const visible = computed(() => {
 function place() {
   const rect = contextPoint.value
     ? new DOMRect(contextPoint.value.x, contextPoint.value.y, 0, 0)
-    : trigger.value?.getBoundingClientRect();
+    : null;
   if (!rect) return;
   const element = popup.value;
   if (!element) return;
   position.value = fitPopover(rect, element.offsetWidth, element.scrollHeight + 2, window.innerWidth, window.innerHeight);
 }
 
-async function toggle() {
-  open.value = !open.value;
-  contextPoint.value = null;
-  filter.value = "";
-  if (open.value) {
-    await nextTick();
-    place();
-    await nextTick();
-    popup.value?.querySelector<HTMLElement>("input, button:not(:disabled)")?.focus({ preventScroll: true });
-  }
-}
-
-async function openAt(x: number, y: number) {
+async function openAt(x: number, y: number, origin?: HTMLElement) {
+  contextOrigin = origin ?? null;
   contextPoint.value = { x, y };
   open.value = true;
   filter.value = "";
@@ -66,7 +59,7 @@ async function openAt(x: number, y: number) {
 function choose(id: string) {
   open.value = false;
   contextPoint.value = null;
-  trigger.value?.focus({ preventScroll: true });
+  restoreFocus();
   emit("select", id);
 }
 
@@ -84,13 +77,12 @@ function onKeydown(event: KeyboardEvent) {
   event.stopPropagation();
   event.preventDefault();
   open.value = false;
-  trigger.value?.focus();
+  restoreFocus();
 }
 
 function onOutsidePointerDown(event: PointerEvent) {
   if (!open.value) return;
   const target = event.target as Node | null;
-  if (trigger.value?.contains(target ?? null)) return;
   if (popup.value?.contains(target ?? null)) return;
   open.value = false;
 }
@@ -116,26 +108,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <span class="relative inline-flex shrink-0" @keydown="onKeydown">
-    <button
-      ref="trigger"
-      type="button"
-      class="inline-flex h-6 w-6 items-center justify-center rounded text-sm leading-none text-neutral-400 opacity-0 transition-colors transition-opacity hover:bg-neutral-200 hover:text-neutral-700 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-neutral-600 dark:hover:text-neutral-200"
-      :class="{ 'opacity-100': open }"
-      :aria-label="label"
-      :title="label"
-      :aria-expanded="open"
-      aria-haspopup="menu"
-      @click.stop="toggle"
-    >⋮</button>
+  <Teleport to="body">
     <div
       v-if="open"
       ref="popup"
       role="menu"
+      :aria-label="label"
       class="fixed z-40 w-52 rounded-md border border-neutral-300 bg-white p-1 text-neutral-900 shadow-lg dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-100"
       :style="{ top: `${position.top}px`, left: `${position.left}px`, maxHeight: position.maxHeight ? `${position.maxHeight}px` : undefined, overflowY: 'auto' }"
       @click.stop
       @pointerdown.stop
+      @keydown="onKeydown"
     >
       <input
         v-if="filterable"
@@ -163,5 +146,5 @@ onUnmounted(() => {
         <p v-if="filterable && visible.length === 0" class="px-2 py-1.5 text-xs text-neutral-400">—</p>
       </div>
     </div>
-  </span>
+  </Teleport>
 </template>

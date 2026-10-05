@@ -26,6 +26,8 @@ pub struct PrecheckItem {
 #[serde(rename_all = "camelCase")]
 pub struct ImportPrecheck {
     #[serde(default)]
+    pub folder_appearance: Option<crate::folder_appearance::Appearances>,
+    #[serde(default)]
     pub organization_adjusted: bool,
     pub items: Vec<PrecheckItem>,
     pub new_count: usize,
@@ -40,6 +42,7 @@ pub struct ImportPrecheck {
 pub struct ImportFile {
     pub prompts: Vec<Prompt>,
     pub organization: Option<RawOrganization>,
+    pub folder_appearance: Option<crate::folder_appearance::Appearances>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -132,6 +135,7 @@ pub fn precheck(
         .count();
     let conflict_count = items.len() - new_count - identical_count;
     ImportPrecheck {
+        folder_appearance: None,
         organization_adjusted: raw_organization
             .is_some_and(|raw| raw.was_adjusted(imported_prompts)),
         organization: Some(Organization::from_import(
@@ -153,6 +157,7 @@ pub fn parse_import_content(content: &str) -> Result<ImportFile, String> {
     Ok(ImportFile {
         prompts,
         organization,
+        folder_appearance: crate::folder_appearance::parse(data.get("folderAppearance")),
     })
 }
 
@@ -386,6 +391,7 @@ pub fn commit_import_impl(
     let prompts = read_locals(tx)?;
     organization.normalize_with_folders(&prompts, &crate::read_folders(tx)?);
     crate::store_organization(tx, &organization)?;
+    crate::folder_appearance::merge(tx, expected.folder_appearance.as_ref())?;
 
     Ok(result)
 }
@@ -1079,6 +1085,51 @@ mod tests {
         assert_eq!(
             crate::load_organization(&conn).unwrap().folder_order,
             vec!["Empty", "empty"]
+        );
+    }
+
+    #[test]
+    fn import_icon_metadata_roundtrips_overrides_and_legacy_preserves() {
+        let mut conn = memory_db();
+        let data = serde_json::json!({
+            "format":"promptdock", "version":1, "prompts":[],
+            "organization":{"folderOrder":["Empty"]},
+            "folderAppearance":{"Empty":{"icon":"book","color":"#9146ff"},"\u{0000}pinned":{"icon":"star","color":"default"}}
+        });
+        let file = parse_import_content(&data.to_string()).unwrap();
+        let mut report = precheck(&file.prompts, &[], file.organization.as_ref());
+        report.folder_appearance = file.folder_appearance;
+        // Serialized precheck retains metadata, including on stale-plan retries.
+        let report: ImportPrecheck =
+            serde_json::from_value(serde_json::to_value(report).unwrap()).unwrap();
+        let tx = conn.transaction().unwrap();
+        commit_import_impl(&tx, &report, &[], 100).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            crate::folder_appearance::read(&conn).unwrap()["Empty"].icon,
+            "book"
+        );
+        let mut legacy = data.clone();
+        legacy.as_object_mut().unwrap().remove("folderAppearance");
+        let file = parse_import_content(&legacy.to_string()).unwrap();
+        let report = precheck(&file.prompts, &[], file.organization.as_ref());
+        let tx = conn.transaction().unwrap();
+        commit_import_impl(&tx, &report, &[], 100).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            crate::folder_appearance::read(&conn).unwrap()["Empty"].icon,
+            "book"
+        );
+        let mut report = report;
+        report.folder_appearance = crate::folder_appearance::parse(Some(
+            &serde_json::json!({"Empty":{"icon":"music","color":"#0085ff"}}),
+        ));
+        let tx = conn.transaction().unwrap();
+        commit_import_impl(&tx, &report, &[], 100).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(
+            crate::folder_appearance::read(&conn).unwrap()["Empty"].icon,
+            "music"
         );
     }
 }

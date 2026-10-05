@@ -98,7 +98,8 @@ function readStore<T>(key: string, fallback: () => T): T {
   }
 }
 
-const initial = readStore(DATA_KEY, () => ({ records: seedRecords(), organization: null as Organization | null }));
+const initial = readStore(DATA_KEY, () => ({ records: seedRecords(), organization: null as Organization | null, folderAppearance: {} as Record<string, { icon: string; color: string }> }));
+let folderAppearance = initial.folderAppearance ?? {};
 let records: Prompt[] = initial.records;
 let organization: Organization = initial.organization ?? seedOrganization(records);
 let prefs: Record<string, string> = readStore(PREFS_KEY, () => ({}));
@@ -115,7 +116,7 @@ const fixtureSettings = {
 };
 
 function persist() {
-  localStorage.setItem(DATA_KEY, JSON.stringify({ records, organization }));
+  localStorage.setItem(DATA_KEY, JSON.stringify({ records, organization, folderAppearance }));
 }
 function persistPrefs() {
   localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
@@ -218,7 +219,13 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
       switch (command) {
         case "load_library": {
           organization = normalized();
-          return clone({ prompts: records, organization } satisfies Library);
+          return clone({ prompts: records, organization, folderAppearance } satisfies Library);
+        }
+        case "set_folder_appearance": {
+          if (args.key && args.key !== "\0pinned" && !organization.folderOrder.includes(args.key)) throw "folder.not_found";
+          folderAppearance[args.key] = clone(args.appearance);
+          persist();
+          return clone(folderAppearance);
         }
         case "get_ui_prefs": return prefs[args.key] ?? "";
         case "set_ui_prefs": prefs[args.key] = args.value; persistPrefs(); return;
@@ -295,14 +302,20 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
           if (!name) throw "folder.empty";
           if (organization.folderOrder.includes(name)) throw "folder.duplicate";
           organization.folderOrder.push(name);
+          delete folderAppearance[name];
           persist();
-          return clone({ folder: name, prompts: records, organization: normalized() } satisfies FolderUpdate);
+          return clone({ folder: name, prompts: records, organization: normalized(), folderAppearance } satisfies FolderUpdate);
         }
         case "rename_folder": {
           const oldName = String(args.oldName);
           const newName = String(args.newName).trim();
           if (!organization.folderOrder.includes(oldName)) throw "folder.not_found";
           if (newName !== oldName && organization.folderOrder.includes(newName)) throw "folder.duplicate";
+          if (newName !== oldName) {
+            delete folderAppearance[newName];
+            if (folderAppearance[oldName]) folderAppearance[newName] = folderAppearance[oldName];
+            delete folderAppearance[oldName];
+          }
           organization.folderOrder = organization.folderOrder.map((folder) => folder === oldName ? newName : folder);
           if (organization.promptOrderByFolder[oldName]) {
             organization.promptOrderByFolder[newName] = organization.promptOrderByFolder[oldName];
@@ -312,11 +325,12 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
             ? { ...record, folder: newName, updatedAt: Date.now() }
             : record);
           persist();
-          return clone({ folder: newName, prompts: records, organization: normalized() } satisfies FolderUpdate);
+          return clone({ folder: newName, prompts: records, organization: normalized(), folderAppearance } satisfies FolderUpdate);
         }
         case "delete_folder": {
           const name = String(args.name);
           if (!organization.folderOrder.includes(name) || !name) throw "folder.not_found";
+          delete folderAppearance[name];
           const moved = organization.promptOrderByFolder[name] ?? [];
           const uncategorized = organization.promptOrderByFolder[""] ?? [];
           organization.promptOrderByFolder[""] = [...uncategorized, ...moved];
@@ -327,7 +341,7 @@ window.confirm = (message) => { state.confirmed.push(String(message)); return tr
             ? { ...record, folder: "", updatedAt: Date.now() }
             : record);
           persist();
-          return clone({ folder: "", prompts: records, organization: normalized() } satisfies FolderUpdate);
+          return clone({ folder: "", prompts: records, organization: normalized(), folderAppearance } satisfies FolderUpdate);
         }
         case "save_prompt": {
           const incoming = clone(args.prompt) as Prompt;

@@ -5,6 +5,7 @@ import { ONBOARDING_STEP_COUNT, moveOnboardingStep, onboardingActions } from "..
 import launcherSearchImage from "../assets/onboarding/launcher-search.png";
 import launcherVariablesImage from "../assets/onboarding/launcher-variables.png";
 import launcherResultImage from "../assets/onboarding/launcher-result.png";
+import importJsonImage from "../assets/onboarding/import-json.png";
 
 const props = defineProps<{
   busy?: boolean;
@@ -15,7 +16,7 @@ const emit = defineEmits<{
   (event: "finish"): void;
 }>();
 
-const targetKeys: Array<string | null> = [null, "create", "variables", "library", "settings", null, null, null];
+const targetKeys: Array<string | null> = [null, null, "create", "variables", "library", "settings", null, null, null];
 const guideImages = [launcherSearchImage, launcherVariablesImage, launcherResultImage];
 const step = ref(0);
 const dialog = ref<HTMLElement | null>(null);
@@ -35,7 +36,7 @@ const spotlightStyle = computed(() => {
 const calloutStyle = computed(() => ({
   left: `${calloutPosition.value.left}px`,
   top: `${calloutPosition.value.top}px`,
-  width: `min(${step.value >= 5 ? 640 : step.value === 2 ? 240 : step.value === 0 ? 430 : 390}px, calc(100vw - 24px))`,
+  width: `min(${step.value === 1 || step.value >= 6 ? 640 : step.value === 3 ? 240 : step.value === 0 ? 430 : 390}px, calc(100vw - 24px))`,
 }));
 
 let transitionLocked = false;
@@ -95,7 +96,7 @@ function positionCallout(rect: DOMRect) {
     left: rect.left,
   };
   const candidates: Array<typeof placement.value> =
-    step.value === 2 ? ["left", "above", "below", "right"] : ["below", "above", "left", "right"];
+    step.value === 3 ? ["left", "above", "below", "right"] : ["below", "above", "left", "right"];
   const fits = (side: typeof placement.value) =>
     spaces[side] >= (side === "left" || side === "right" ? width : height) + gap + margin;
   const nextPlacement = candidates.find(fits) ?? candidates.reduce((best, side) =>
@@ -235,20 +236,21 @@ onUnmounted(() => {
       </header>
 
       <div :id="`onboarding-body-${step}`" class="min-h-0 overflow-y-auto px-5 pb-4 text-sm leading-6 text-neutral-600 dark:text-neutral-300">
-        <p v-if="step !== 5">{{ t(bodyKey) }}</p>
+        <p v-if="step !== 6">{{ t(bodyKey) }}</p>
         <p v-else>
           {{ t("onboardingDefaultHotkey") }}
           <kbd class="rounded-md border border-neutral-300 bg-neutral-50 px-1.5 py-0.5 font-mono text-xs font-bold text-neutral-800 shadow-sm dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-100">{{ t("onboardingDefaultHotkeyValue") }}</kbd>{{ t("onboardingSentencePeriod") }}
           {{ t(bodyKey) }}
         </p>
-        <div v-if="step === 2" class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-700 dark:bg-neutral-900">
-          <p class="text-xs leading-5 text-neutral-600 dark:text-neutral-300">{{ t("onboardingStep3VariableHelp") }}</p>
+        <img v-if="step === 1" :src="importJsonImage" :alt="t('onboardingStep2ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
+        <div v-else-if="step === 3" class="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-700 dark:bg-neutral-900">
+          <p class="text-xs leading-5 text-neutral-600 dark:text-neutral-300">{{ t("onboardingStep4VariableHelp") }}</p>
         </div>
-        <template v-else-if="step === 5">
-          <img :src="guideImages[0]" :alt="t('onboardingStep6ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
+        <template v-else-if="step === 6">
+          <img :src="guideImages[0]" :alt="t('onboardingStep7ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
         </template>
-        <img v-else-if="step === 6" :src="guideImages[1]" :alt="t('onboardingStep7ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
-        <img v-else-if="step === 7" :src="guideImages[2]" :alt="t('onboardingStep8ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
+        <img v-else-if="step === 7" :src="guideImages[1]" :alt="t('onboardingStep8ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
+        <img v-else-if="step === 8" :src="guideImages[2]" :alt="t('onboardingStep9ImageAlt')" class="tour-screenshot mt-3" @load="updateGeometry" />
       </div>
 
       <p v-if="error" class="mx-5 mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:bg-red-950/50 dark:text-red-200" role="alert">{{ error }}</p>

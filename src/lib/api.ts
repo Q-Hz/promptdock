@@ -1,3 +1,5 @@
+import type { FolderAppearance, FolderAppearances } from "./folder-appearance";
+
 export interface Prompt {
   id: string;
   title: string;
@@ -22,6 +24,7 @@ export interface Organization {
 export interface Library {
   prompts: Prompt[];
   organization: Organization;
+  folderAppearance?: FolderAppearances;
 }
 
 // 目标字段更新与跨文件夹移动的返回值：只带回受影响的记录与最新顺序
@@ -34,6 +37,7 @@ export interface FolderUpdate {
   folder: string;
   prompts: Prompt[];
   organization: Organization;
+  folderAppearance?: FolderAppearances;
 }
 
 export interface Settings {
@@ -67,6 +71,7 @@ export interface PrecheckItem {
 }
 
 export interface ImportPrecheck {
+  folderAppearance?: FolderAppearances | null;
   organizationAdjusted?: boolean;
   items: PrecheckItem[];
   newCount: number;
@@ -128,6 +133,8 @@ export const api = {
     invoke("rename_folder", { oldName, newName, expected }),
   deleteFolder: (name: string, expected: Organization): Promise<FolderUpdate> =>
     invoke("delete_folder", { name, expected }),
+  setFolderAppearance: (key: string, appearance: FolderAppearance): Promise<FolderAppearances> =>
+    invoke("set_folder_appearance", { key, appearance }),
   getUiPrefs: (key: string): Promise<string> => invoke("get_ui_prefs", { key }),
   setUiPrefs: (key: string, value: string): Promise<void> =>
     invoke("set_ui_prefs", { key, value }),
@@ -150,8 +157,9 @@ export const api = {
   // stale 后基于首次读取的内存快照重新预检查，不重新读取磁盘文件
   precheckImportSnapshot: (
     prompts: Prompt[],
-    organization: Organization | null
-  ): Promise<ImportPrecheck> => invoke("precheck_import_snapshot", { prompts, organization }),
+    organization: Organization | null,
+    folderAppearance: FolderAppearances | null = null
+  ): Promise<ImportPrecheck> => invoke("precheck_import_snapshot", { prompts, organization, folderAppearance }),
   // 提交完整预检查快照，供后端在事务内核对候选关系和业务字段（PRD 8.4）
   commitImport: (precheck: ImportPrecheck, decisions: ImportDecision[]): Promise<ImportResult> =>
     invoke("commit_import", { precheck, decisions }),

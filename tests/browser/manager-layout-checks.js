@@ -1,3 +1,4 @@
+import { openContextMenu } from './hold-drag-helpers.js';
 // Execute through browser eval against /tests/browser/manager-layout.html:
 //   import('/tests/browser/manager-layout-checks.js').then(m => m.runManagerLayoutChecks())
 // Each group can also run on its own; they restore what they mutate so order does not matter much.
@@ -57,7 +58,7 @@ async function revealRow(title, promptId) {
   for (let i = 0; i < 12; i++) {
     const section = folderSection(title);
     if (section?.querySelector(`[data-prompt-id="${promptId}"]`)) return section;
-    const more = section && sectionButton(section, "显示更多");
+    const more = section && sectionButton(section, "展开显示");
     if (!more) throw new Error(`Row never became visible: ${promptId}`);
     more.click();
     await tick();
@@ -87,27 +88,16 @@ async function moveViaEditor(promptId, folder) {
   await until(() => fixtureRecord(promptId).folder === folder, `the editor move to ${folder} to commit`);
   await awaitRowInSection(promptId, folder);
 }
-
-function menuTrigger(scope, label) {
-  const trigger = [...scope.querySelectorAll("button")].find((button) => button.textContent.trim() === "⋮");
-  if (!trigger) return null;
-  if (trigger.getAttribute("aria-label") !== label) {
-    throw new Error(`Unexpected accessible name: ${trigger.getAttribute("aria-label")} (expected ${label})`);
-  }
-  return trigger;
-}
-
 async function openRowMenu(section, promptId, label = PROMPT_MENU_LABEL) {
   const row = section.querySelector(`[data-prompt-id="${promptId}"]`);
   if (!row) throw new Error(`Row not visible: ${promptId}`);
   row.scrollIntoView({ block: "nearest" });
   await settleScroll();
-  const trigger = menuTrigger(row, label);
-  if (!trigger) throw new Error(`Menu trigger missing on ${promptId}`);
-  trigger.click();
+  openContextMenu(row);
   await tick();
   const menu = document.querySelector('div[role="menu"]');
   if (!menu) throw new Error(`Menu did not open for ${promptId}`);
+  if (menu.getAttribute('aria-label') !== label) throw new Error(`Unexpected menu label for ${promptId}`);
   return menu;
 }
 
@@ -134,12 +124,11 @@ async function openFolderMenu(title, label = FOLDER_MENU_LABEL) {
   if (!section) throw new Error(`Folder missing: ${title}`);
   section.querySelector("header")?.scrollIntoView({ block: "nearest" });
   await settleScroll();
-  const trigger = menuTrigger(section.querySelector("header"), label);
-  if (!trigger) throw new Error(`Folder menu trigger missing on ${title}`);
-  trigger.click();
+  openContextMenu(section.querySelector("header"));
   await tick();
   const menu = document.querySelector('div[role="menu"]');
   if (!menu) throw new Error(`Folder menu did not open for ${title}`);
+  if (menu.getAttribute('aria-label') !== label) throw new Error(`Unexpected folder menu label for ${title}`);
   return menu;
 }
 
@@ -200,20 +189,20 @@ export async function runStructureChecks() {
   check(!!notes, "Note organization section missing");
   check(countLabel(notes) === "30 条", `folder count must stay the real total: ${countLabel(notes)}`);
   check(rows(notes).length === 5, `default batch should show 5 rows, got ${rows(notes).length}`);
-  check(sectionButton(notes, "显示更多")?.textContent.trim() === "显示更多", "show-more omits the remaining count");
+  check(sectionButton(notes, "展开显示")?.textContent.trim() === "展开显示", "show-more omits the remaining count");
   check(sectionButton(notes, "收起列表") === undefined, "collapse-list should be hidden at the default batch");
 
   const writing = folderSection("WRITING");
   check(rows(writing).length === 5, "6-item folder still shows only 5");
-  check(sectionButton(writing, "显示更多")?.textContent.trim() === "显示更多", "6-item folder also uses the short label");
+  check(sectionButton(writing, "展开显示")?.textContent.trim() === "展开显示", "6-item folder also uses the short label");
 
   const exact = folderSection("EXACTLY FIVE");
   check(rows(exact).length === 5, "5-item folder shows all");
-  check(sectionButton(exact, "显示更多") === undefined, "5-item folder must not offer show-more");
+  check(sectionButton(exact, "展开显示") === undefined, "5-item folder must not offer show-more");
 
   const solo = folderSection("SOLO");
   check(rows(solo).length === 1, "1-item folder shows its single prompt");
-  check(sectionButton(solo, "显示更多") === undefined, "1-item folder must not offer show-more");
+  check(sectionButton(solo, "展开显示") === undefined, "1-item folder must not offer show-more");
 
   check(!!folderSection("未分类（系统）"), "the uncategorized section should use the explicit system label");
   const uncategorized = folderSection("未分类（系统）");
@@ -223,7 +212,7 @@ export async function runStructureChecks() {
 
   const empty = folderSection("EMPTY FOLDER");
   check(!!empty && countLabel(empty) === "0 条", "an explicit empty folder remains visible with a zero count");
-  check(rows(empty).length === 0 && sectionButton(empty, "显示更多") === undefined,
+  check(rows(empty).length === 0 && sectionButton(empty, "展开显示") === undefined,
     "an empty folder has no rows or batch controls");
 
   const duplicates = folderSection("DUPLICATES");
@@ -231,20 +220,20 @@ export async function runStructureChecks() {
   return { group: "structure", assertions };
 }
 
-// ---- AC-07: 显示更多 / 收起 / 折叠 ----
+// ---- AC-07: 展开显示 / 收起 / 折叠 ----
 export async function runBatchChecks() {
   let assertions = 0;
   const check = (value, message) => { if (!value) throw new Error(message); assertions++; };
   const notes = folderSection("NOTE ORGANIZATION");
   check(rows(notes).length === 5, "batch checks expect the default 5 rows");
 
-  sectionButton(notes, "显示更多").click();
+  sectionButton(notes, "展开显示").click();
   await tick();
   check(rows(notes).length === 10, `show more adds 5, got ${rows(notes).length}`);
-  check(sectionButton(notes, "显示更多")?.textContent.trim() === "显示更多", "show-more label stays short after loading another batch");
+  check(sectionButton(notes, "展开显示")?.textContent.trim() === "展开显示", "show-more label stays short after loading another batch");
   check(sectionButton(notes, "收起列表") !== undefined, "collapse-list appears once more than 5 are shown");
 
-  sectionButton(notes, "显示更多").click();
+  sectionButton(notes, "展开显示").click();
   await tick();
   check(rows(notes).length === 15, "second show-more adds another 5");
 
@@ -265,7 +254,7 @@ export async function runBatchChecks() {
   check(countLabel(collapsed) === "6 条", "a collapsed folder keeps its real count");
   check(collapsed.querySelector('[role="separator"][aria-orientation="horizontal"]') === null,
     "folder sections do not contain a height grip");
-  check(sectionButton(collapsed, "显示更多") === undefined, "a collapsed folder hides show-more");
+  check(sectionButton(collapsed, "展开显示") === undefined, "a collapsed folder hides show-more");
   check(collapsed.querySelector("header button").getAttribute("aria-expanded") === "false",
     "the toggle reports its collapsed state");
 
@@ -276,7 +265,7 @@ export async function runBatchChecks() {
     "the toggle reports its expanded state");
 
   // 切换其他提示词不改变已展示数量
-  sectionButton(folderSection("NOTE ORGANIZATION"), "显示更多").click();
+  sectionButton(folderSection("NOTE ORGANIZATION"), "展开显示").click();
   await tick();
   rows(folderSection("EXACTLY FIVE"))[0].querySelector("button").click();
   await tick();
@@ -671,7 +660,7 @@ export async function runSearchChecks() {
 
   // 先折叠一个文件夹并把它显示到 10 条，确认搜索不受影响、清空后可恢复
   const notes = folderSection("NOTE ORGANIZATION");
-  sectionButton(notes, "显示更多").click();
+  sectionButton(notes, "展开显示").click();
   await tick();
   check(rows(folderSection("NOTE ORGANIZATION")).length === 10, "precondition: 10 rows shown");
   folderSection("WRITING").querySelector("header button").click();
@@ -695,15 +684,13 @@ export async function runSearchChecks() {
   check(rows(folderSection("WRITING")).length === 5, "a matched collapsed folder expands to the first batch");
   check(countLabel(folderSection("WRITING")) === "匹配 6 / 共 6",
     `matched count: ${countLabel(folderSection("WRITING"))}`);
-  sectionButton(folderSection("WRITING"), "显示更多").click();
+  sectionButton(folderSection("WRITING"), "展开显示").click();
   await tick();
   check(rows(folderSection("WRITING")).length === 6, "search results also batch by five");
 
   // 非空搜索时禁用拖动排序，但保留“移动到文件夹”
   const row = rows(folderSection("WRITING"))[0];
-  check(row.getAttribute("draggable") !== "true"
-    && row.querySelector('[data-prompt-drag-handle]').getAttribute("draggable") === "false",
-    "the dedicated drag handle must be disabled during a search");
+  check(row.dataset.holdDraggable === 'false', 'row hold dragging is disabled during search');
   check(folderSection("WRITING").textContent.includes("清空搜索后可拖动排序"),
     "the disabled state must be explained");
   const menu = await openRowMenu(folderSection("WRITING"), row.dataset.promptId);
@@ -727,9 +714,7 @@ export async function runSearchChecks() {
     "clearing the search restores the previously shown count");
   check(rows(folderSection("WRITING")).length === 0, "clearing the search restores the collapsed folder");
   check(rows(folderSection("WRITING") ?? document.createElement("div")).length === 0, "still collapsed");
-  check(rows(folderSection("NOTE ORGANIZATION"))[0]
-    .querySelector('[data-prompt-drag-handle]').getAttribute("draggable") === "true",
-    "the dedicated drag handle is enabled again once the search is cleared");
+  check(rows(folderSection('NOTE ORGANIZATION'))[0].dataset.holdDraggable === 'true', 'row hold dragging is enabled after clearing search');
   folderSection("WRITING").querySelector("header button").click();
   await tick();
   sectionButton(folderSection("NOTE ORGANIZATION"), "收起列表").click();
@@ -836,7 +821,7 @@ export async function runLocaleChecks() {
 
   check(document.querySelector('aside input[placeholder^="Search"]') !== null,
     "the fixture should render the English interface");
-  check(!document.querySelector("aside").textContent.includes("显示更多"),
+  check(!document.querySelector("aside").textContent.includes("展开显示"),
     "no Chinese batching label remains in the English sidebar");
   check(document.documentElement.classList.contains("dark"), "the fixture should run in the dark theme");
 
@@ -886,7 +871,7 @@ export async function runLocaleChecks() {
   // 行菜单与文件夹菜单使用英文文案，深色主题下弹层为深色
   const menu = await openRowMenu(folderSection("EXACTLY FIVE"), "exact-1", "Prompt actions");
   const labels = [...menu.querySelectorAll('button[role="menuitem"]')].map((button) => button.textContent.trim());
-  check(labels.join("|") === "Favorite|Pin|Move up|Move down|Move to end of folder|Move to folder",
+  check(labels.join("|") === "Favorite|Pin|Move up|Move down|Move to end of folder|Move to folder|Delete prompt…",
     `English prompt menu: ${labels.join("|")}`);
   const menuBackground = getComputedStyle(menu).backgroundColor;
   check(menuBackground !== "rgb(255, 255, 255)", `the menu surface follows the dark theme: ${menuBackground}`);
@@ -912,7 +897,7 @@ export async function runLocaleChecks() {
   const folderMenu = await openFolderMenu("WRITING", "Folder actions");
   const folderLabels = [...folderMenu.querySelectorAll('button[role="menuitem"]')]
     .map((button) => button.textContent.trim());
-  check(folderLabels.join("|") === "Move up|Move down|Rename|Delete folder", `English folder menu: ${folderLabels.join("|")}`);
+  check(folderLabels.join("|") === "Move up|Move down|Rename|Delete folder|Change icon", `English folder menu: ${folderLabels.join("|")}`);
   await pressKey(folderMenu.querySelector('button[role="menuitem"]'), "Escape");
   await setText(search, "");
   await until(() => countLabel(folderSection("NOTE ORGANIZATION")) === "30", "the search to clear");
@@ -927,9 +912,9 @@ export async function prepareRestartState() {
   await pressKey(separator, "ArrowRight");
   await pressKey(separator, "ArrowRight");
   const notes = folderSection("NOTE ORGANIZATION");
-  sectionButton(notes, "显示更多").click();
+  sectionButton(notes, "展开显示").click();
   await tick();
-  sectionButton(notes, "显示更多").click();
+  sectionButton(notes, "展开显示").click();
   await tick();
   folderSection("WRITING").querySelector("header button").click();
   await tick();
@@ -986,14 +971,14 @@ export async function runBulkFolderChecks() {
   check(expand.querySelector('path')?.getAttribute('d') === 'm7 14 5 5 5-5M7 10l5-5 5 5'
     && collapse.querySelector('path')?.getAttribute('d') === 'M7 4l5 4 5-4M7 20l5-4 5 4',
     'collapse keeps the original expand icon style while pointing inward with clear spacing');
-  const more = sectionButton(notes, '显示更多');
+  const more = sectionButton(notes, '展开显示');
   let box = more.getBoundingClientRect();
   const container = notes.getBoundingClientRect();
-  check(Math.abs((box.left + box.right) / 2 - (container.left + container.right) / 2) < 2, 'show more is centered');
+  check(Math.abs(box.left - notes.querySelector('[data-prompt-id] button').getBoundingClientRect().left) < 2, 'show more aligns with prompt rows');
   more.click();
   await tick();
-  box = sectionButton(notes, '显示更多').getBoundingClientRect();
-  check(Math.abs((box.left + box.right) / 2 - (container.left + container.right) / 2) < 2, 'show more stays centered alongside collapse-list');
+  box = sectionButton(notes, '展开显示').getBoundingClientRect();
+  check(Math.abs(box.top - sectionButton(notes, '收起列表').getBoundingClientRect().top) < 2, 'show more and collapse-list share one line');
   await setText(body, 'Bulk action unsaved draft');
   collapse.click();
   await tick();
@@ -1082,7 +1067,7 @@ export async function runFolderCrudChecks() {
   let menu = document.querySelector('div[role="menu"]');
   check(!!menu, 'right-click opens the custom folder menu');
   const labels = [...menu.querySelectorAll('button[role="menuitem"]')].map((button) => button.textContent.trim());
-  check(labels.join('|') === '上移|下移|重命名|删除文件夹', `right-click menu actions: ${labels.join('|')}`);
+  check(labels.join('|') === '上移|下移|重命名|删除文件夹|更改图标', `right-click menu actions: ${labels.join('|')}`);
 
   // Cancel is the safe path; accepting then moves members to the system group.
   window.managerFixture.answerDialog(false);
@@ -1122,23 +1107,10 @@ export async function runPromptContextChecks() {
   await pressKey(regularItems[0], 'Escape');
 
   const row = folderSection('DUPLICATES').querySelector('[data-prompt-id="dup-2"]');
-  const promptDrag = row.querySelector('[data-prompt-drag-handle]');
-  const promptMenuTrigger = [...row.querySelectorAll('button')]
-    .find((button) => button.getAttribute('aria-label') === 'Prompt 操作');
   const folderHeader = folderSection('DUPLICATES').querySelector('header');
-  const folderDrag = folderHeader.querySelector('[data-folder-drag-handle]');
-  const folderMenuTrigger = [...folderHeader.querySelectorAll('button')]
-    .find((button) => button.getAttribute('aria-label') === '文件夹操作');
-
-  check(!!promptDrag && !!folderDrag, 'folders and prompts expose explicit drag handles');
-  check(promptDrag.getAttribute('draggable') === 'true' && row.getAttribute('draggable') !== 'true',
-    'only the prompt drag handle starts dragging');
-  check(promptDrag.compareDocumentPosition(promptMenuTrigger) & Node.DOCUMENT_POSITION_FOLLOWING,
-    'the prompt drag handle sits immediately before its action menu');
-  check(folderDrag.compareDocumentPosition(folderMenuTrigger) & Node.DOCUMENT_POSITION_FOLLOWING,
-    'the folder drag handle uses the same right-side placement');
-  check(Math.abs(promptDrag.getBoundingClientRect().width - folderDrag.getBoundingClientRect().width) < 1,
-    'folder and prompt drag handles use the same hit area');
+  check(!document.querySelector('[data-prompt-drag-handle], [data-folder-drag-handle]'), 'drag handles are removed');
+  check(![...document.querySelectorAll('button')].some(button => button.textContent.trim() === '⋮'), 'menu buttons are removed');
+  check(row.dataset.holdDraggable === 'true' && folderHeader.dataset.holdDraggable === 'true', 'whole rows support hold dragging');
 
   const draftBody = document.querySelector('main textarea').value;
   const draftTitle = document.querySelector('main input[placeholder="Prompt 标题"]').value;

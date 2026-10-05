@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod folder_appearance;
 mod import_logic;
 #[cfg(test)]
 mod manager_regression_tests;
@@ -93,6 +94,7 @@ pub struct Prompt {
 pub struct Library {
     pub prompts: Vec<Prompt>,
     pub organization: Organization,
+    pub folder_appearance: folder_appearance::Appearances,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -108,6 +110,7 @@ pub struct FolderUpdate {
     pub folder: String,
     pub prompts: Vec<Prompt>,
     pub organization: Organization,
+    pub folder_appearance: folder_appearance::Appearances,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +208,7 @@ fn initialize_db(connection: &mut Connection) -> Result<bool, String> {
     )
     .map_err(|e| e.to_string())?;
     ensure_organization(&conn)?;
+    folder_appearance::init(&conn)?;
     // 首次升级只物化当前仍被 Prompt 引用的普通文件夹；旧 organization 中的
     // 无成员槽位不会进入 folders 表，因此不会变成幽灵空文件夹。
     if !had_folders_table {
@@ -460,6 +464,7 @@ fn load_library(state: tauri::State<DbState>) -> Result<Library, String> {
     Ok(Library {
         prompts,
         organization,
+        folder_appearance: folder_appearance::read(&conn)?,
     })
 }
 
@@ -799,6 +804,7 @@ fn folder_snapshot(conn: &Connection, folder: String) -> Result<FolderUpdate, St
         folder,
         prompts,
         organization,
+        folder_appearance: folder_appearance::read(conn)?,
     })
 }
 
@@ -827,6 +833,7 @@ fn create_folder_impl(
     require_current_organization(&current, expected)?;
     tx.execute("INSERT INTO folders(name) VALUES (?1)", [&name])
         .map_err(|e| e.to_string())?;
+    folder_appearance::remove(&tx, &name)?;
     let mut organization = current;
     organization.create_folder(&name);
     organization.normalize_with_folders(&prompts, &read_folders(&tx)?);
@@ -875,6 +882,7 @@ fn rename_folder_impl(
         params![new_name, old_name],
     )
     .map_err(|e| e.to_string())?;
+    folder_appearance::rename(&tx, old_name, &new_name)?;
     tx.execute(
         "UPDATE prompts SET folder=?1, updated_at=?2 WHERE folder=?3",
         params![new_name, chrono_now(), old_name],
@@ -922,6 +930,7 @@ fn delete_folder_impl(
     .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM folders WHERE name=?1", [&name])
         .map_err(|e| e.to_string())?;
+    folder_appearance::remove(&tx, name)?;
     let prompts = read_prompts(&tx)?;
     let mut organization = current;
     organization.delete_folder(&name);
@@ -930,6 +939,23 @@ fn delete_folder_impl(
     let update = folder_snapshot(&tx, String::new())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(update)
+}
+
+#[tauri::command]
+fn set_folder_appearance(
+    state: tauri::State<DbState>,
+    key: String,
+    appearance: folder_appearance::Appearance,
+) -> Result<folder_appearance::Appearances, String> {
+    let mut conn = state.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    if !key.is_empty() && key != folder_appearance::PINNED && !folder_exists(&tx, &key)? {
+        return Err("folder.not_found".into());
+    }
+    folder_appearance::write(&tx, &key, &appearance)?;
+    let result = folder_appearance::read(&tx)?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(result)
 }
 
 // 界面偏好（尺寸、折叠状态）只保存在本地，不进入 Prompt 的 JSON 导出
@@ -1538,6 +1564,7 @@ fn export_prompts(state: tauri::State<DbState>, path: String) -> Result<(), Stri
         "exportedAt": chrono_now(),
         "prompts": prompts,
         "organization": organization,
+        "folderAppearance": folder_appearance::read(&conn)?,
     });
     fs::write(
         &path,
@@ -1674,6 +1701,13 @@ fn import_prompts(
             .map_err(|e| e.to_string())?;
     }
     store_organization(&tx, &organization)?;
+    // Keep same-name local icons for legacy files, and remove disappeared folders.
+    for key in folder_appearance::read(&tx)?.keys() {
+        if !key.is_empty() && key != folder_appearance::PINNED && !folder_exists(&tx, key)? {
+            folder_appearance::remove(&tx, key)?;
+        }
+    }
+    folder_appearance::merge(&tx, file.folder_appearance.as_ref())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "count": file.prompts.len(),
@@ -1689,11 +1723,9 @@ fn precheck_import(
     let file = import_logic::parse_import_content(&content)?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let locals = read_prompts(&conn)?;
-    Ok(import_logic::precheck(
-        &file.prompts,
-        &locals,
-        file.organization.as_ref(),
-    ))
+    let mut result = import_logic::precheck(&file.prompts, &locals, file.organization.as_ref());
+    result.folder_appearance = file.folder_appearance;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1701,16 +1733,15 @@ fn precheck_import_snapshot(
     state: tauri::State<DbState>,
     prompts: Vec<Prompt>,
     organization: Option<organization::RawOrganization>,
+    folder_appearance: Option<folder_appearance::Appearances>,
 ) -> Result<import_logic::ImportPrecheck, String> {
     // stale 后继续使用首次打开文件时的内存快照，不静默重读磁盘文件（PRD 8.4）。
     import_logic::validate_import_snapshot(&prompts)?;
     let conn = state.0.lock().map_err(|e| e.to_string())?;
     let locals = read_prompts(&conn)?;
-    Ok(import_logic::precheck(
-        &prompts,
-        &locals,
-        organization.as_ref(),
-    ))
+    let mut result = import_logic::precheck(&prompts, &locals, organization.as_ref());
+    result.folder_appearance = folder_appearance;
+    Ok(result)
 }
 
 #[tauri::command]
@@ -1998,6 +2029,7 @@ pub fn run() {
             create_folder,
             rename_folder,
             delete_folder,
+            set_folder_appearance,
             get_ui_prefs,
             set_ui_prefs,
             copy_text,

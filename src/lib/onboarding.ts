@@ -1,4 +1,4 @@
-export const ONBOARDING_STEP_COUNT = 8;
+export const ONBOARDING_STEP_COUNT = 9;
 
 export interface OnboardingActions {
   skip: true;

@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { holdDragReady } from "../src/lib/hold-drag.ts";
 
 import type { Organization, Prompt } from "../src/lib/api.ts";
 import {
   arrangeFolders, arrangePinned, batchView, BATCH_SIZE, emptyOrganization, moveWithin,
   nextBatch, orderMembers, PINNED_SECTION_KEY, reorder, reorderIndex, shift, sortLauncher,
 } from "../src/lib/organization.ts";
+
+test("hold dragging requires both 300ms and movement, including after early movement", () => {
+  assert.equal(holdDragReady(100, 399, 20, 0, 0, 0), false);
+  assert.equal(holdDragReady(100, 400, 0, 0, 0, 0), false);
+  assert.equal(holdDragReady(100, 400, 3, 0, 0, 0), false);
+  assert.equal(holdDragReady(100, 400, 5, 0, 0, 0), true);
+});
 
 function prompt(id: string, overrides: Partial<Prompt> = {}): Prompt {
   return {

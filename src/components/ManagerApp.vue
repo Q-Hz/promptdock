@@ -23,12 +23,33 @@ import ImportComparePage from "./import/ImportComparePage.vue";
 import ImportModeDialog from "./import/ImportModeDialog.vue";
 import ResizableSplit from "./import/ResizableSplit.vue";
 import FolderSection from "./manager/FolderSection.vue";
+import FolderIconPicker from "./manager/FolderIconPicker.vue";
+import { normalizeAppearance, type FolderAppearance, type FolderAppearances } from "../lib/folder-appearance";
 import { selectedIdAfterImport } from "../lib/import-selection";
 import { MutationQueue } from "../lib/mutation-queue";
 import { validateFolderName, validatePromptFolder, type FolderNameError } from "../lib/folder-name";
 
 const prompts = ref<Prompt[]>([]);
 const organization = ref<Organization>(emptyOrganization());
+const folderAppearances = ref<FolderAppearances>({});
+const iconPicker = ref<{ key: string; title: string } | null>(null);
+const iconSaving = ref(false);
+const iconError = ref("");
+
+async function saveFolderIcon(appearance: FolderAppearance) {
+  if (!iconPicker.value || iconSaving.value) return;
+  const key = iconPicker.value.key;
+  iconSaving.value = true;
+  iconError.value = "";
+  try {
+    folderAppearances.value = await mutations.run(() => api.setFolderAppearance(key, appearance));
+    iconPicker.value = null;
+  } catch (error) {
+    iconError.value = t("operationFailed", { error: translateApiError(error) });
+  } finally {
+    iconSaving.value = false;
+  }
+}
 const query = ref("");
 const selectedId = ref<string | null>(null);
 const showSettings = ref(false);
@@ -395,6 +416,7 @@ function folderErrorText(error: FolderNameError | string): string {
 function applyFolderUpdate(update: FolderUpdate) {
   prompts.value = update.prompts;
   organization.value = update.organization;
+  folderAppearances.value = update.folderAppearance ?? {};
 }
 
 async function focusFolder(name: string) {
@@ -562,7 +584,12 @@ async function requestDeleteFolder(name: string) {
   }
 }
 
-async function onFolderAction(action: "up" | "down" | "rename" | "delete", sectionKey: string) {
+async function onFolderAction(action: "up" | "down" | "rename" | "delete" | "icon", sectionKey: string) {
+  if (action === "icon") {
+    iconError.value = "";
+    iconPicker.value = { key: sectionKey, title: sectionKey === PINNED_SECTION_KEY ? t("pinnedSection") : sectionKey || t("uncategorizedSystem") };
+    return;
+  }
   if (action === "rename") {
     startRenameFolder(sectionKey);
     return;
@@ -901,6 +928,7 @@ async function reload() {
   const library = await api.loadLibrary();
   prompts.value = library.prompts;
   organization.value = library.organization;
+  folderAppearances.value = library.folderAppearance ?? {};
 }
 
 function select(p: Prompt) {
@@ -998,7 +1026,7 @@ type ImportSource = { kind: "path"; path: string } | { kind: "drop"; files: File
 
 function canAcceptFileDrop(): boolean {
   return managerReady.value && !importSession.value && !importing.value && !importEntryBusy.value
-    && !saving.value && !showSettings.value && !showVariableExamples.value
+    && !saving.value && !showSettings.value && !showVariableExamples.value && !iconPicker.value
     && !onboardingOpen.value && !confirmDialog.open;
 }
 
@@ -1179,7 +1207,8 @@ async function commitAppend(precheck: ImportPrecheck, decisions: ImportDecision[
         alert(t("importStalePlan"));
         const fresh = await api.precheckImportSnapshot(
           precheck.items.map((item) => item.imported),
-          precheck.organization
+          precheck.organization,
+          precheck.folderAppearance ?? null
         );
         fresh.organizationAdjusted ||= precheck.organizationAdjusted;
         if (fresh.conflictCount > 0) {
@@ -1281,6 +1310,7 @@ async function handleWindowKeydown(event: KeyboardEvent) {
     || showSettings.value
     || onboardingOpen.value
     || showVariableExamples.value
+    || !!iconPicker.value
     || confirmDialog.open;
 
   if (matchesKeybinding(event, "cmdorctrl+s")) {
@@ -1366,8 +1396,8 @@ async function handleQuitRequest() {
       v-else
       class="flex h-full flex-col"
       :aria-busy="importing || saving"
-      :inert="saving || (importing && !importSession) || onboardingOpen || showVariableExamples || importModeOpen ? true : undefined"
-      :aria-hidden="onboardingOpen || showVariableExamples || importModeOpen ? 'true' : undefined"
+      :inert="saving || (importing && !importSession) || onboardingOpen || showVariableExamples || importModeOpen || iconPicker ? true : undefined"
+      :aria-hidden="onboardingOpen || showVariableExamples || importModeOpen || iconPicker ? 'true' : undefined"
     >
     <!-- 导入冲突在本页处理并直接确认，不再经过摘要页。 -->
     <template v-if="importSession">
@@ -1459,6 +1489,7 @@ async function handleQuitRequest() {
                   :section-key="section.key"
                   :variant="section.variant"
                   :title="section.title"
+                  :appearance="normalizeAppearance(folderAppearances[section.key], section.key)"
                   :items="section.items"
                   :total="section.total"
                   :selected-id="selectedId"
@@ -1671,4 +1702,14 @@ async function handleQuitRequest() {
       </div>
     </div>
   </div>
+  <FolderIconPicker
+    v-if="iconPicker"
+    :section-key="iconPicker.key"
+    :title="iconPicker.title"
+    :appearance="normalizeAppearance(folderAppearances[iconPicker.key], iconPicker.key)"
+    :busy="iconSaving"
+    :error="iconError"
+    @save="saveFolderIcon"
+    @cancel="iconPicker = null"
+  />
 </template>

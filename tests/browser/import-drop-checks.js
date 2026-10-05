@@ -1,3 +1,4 @@
+import { startHoldDrag } from './hold-drag-helpers.js';
 // Run in /tests/browser/import-flow.html with a fresh fixture.
 export async function runImportDropChecks() {
   const fixture = window.importFixture;
@@ -39,13 +40,13 @@ export async function runImportDropChecks() {
   };
 
   check(!!target, "Manager editor is missing");
-  const handle = document.querySelector("[data-prompt-drag-handle]");
+  const handle = document.querySelector("[data-prompt-id]");
   const internal = new DataTransfer();
-  handle.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true, dataTransfer: internal }));
+  await startHoldDrag(handle);
   target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: internal }));
   await tick();
   check(!document.querySelector("[data-import-drop-overlay]"), "Internal sorting showed file import overlay");
-  handle.dispatchEvent(new DragEvent("dragend", { bubbles: true, dataTransfer: internal }));
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 
   let transfer = await drag([new File(["text"], "notes.txt")]);
   check(!!document.querySelector("[data-import-drop-overlay]"), "External file drag showed no overlay");
