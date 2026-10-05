@@ -46,6 +46,8 @@ export async function runFolderIconChecks() {
     return document.querySelector('[data-folder-icon-picker]');
   }
   let picker = await open('Note organization');
+  check(button(picker, '取消').title === 'Esc', 'cancel advertises Esc');
+  check(button(picker, '取消').getAttribute('aria-keyshortcuts') === 'Escape', 'cancel exposes its keyboard shortcut');
   check(picker.querySelectorAll('[data-icon-id]').length === 40, 'forty icon choices');
   check(picker.querySelectorAll('[aria-label="图标颜色"] button').length === 8, 'eight swatches');
   check(document.querySelector('[data-manager-sidebar]').closest('[inert]') !== null, 'background is inert');

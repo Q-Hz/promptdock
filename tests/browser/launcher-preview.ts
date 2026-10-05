@@ -5,7 +5,9 @@ import "../../src/style.css";
 const prompt = {
   id: "preview-fixture",
   title: "Markdown 预览验收",
-  body: "# 验收结论\n\n- **通过**：已完成\n- `待检查`：继续复验\n\n> 以实际结果为准。",
+  body: new URLSearchParams(location.search).has("back-guard")
+    ? "# {{text=initial}}\n{{choice=[a|b]}}\n{{multi+=[x|y]}}"
+    : "# 验收结论\n\n- **通过**：已完成\n- `待检查`：继续复验\n\n> 以实际结果为准。",
   tags: ["preview"],
   folder: "测试",
   favorite: false,

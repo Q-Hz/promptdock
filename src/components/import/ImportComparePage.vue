@@ -223,6 +223,8 @@ defineExpose({ hasAnyProgress });
       <button
         class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700"
         :disabled="busy"
+        title="Esc"
+        aria-keyshortcuts="Escape"
         @click="cancelImport"
       >{{ t("cancelImport") }}</button>
       <button

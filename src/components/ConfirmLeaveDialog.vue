@@ -15,10 +15,18 @@ function choose(choice: DialogChoice | DiscardChoice) {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  if (confirmDialog.mode === "launcher-back" && e.key === "Enter" &&
+      !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.isComposing && !e.repeat) choose("discard");
+    return;
+  }
   if (e.key === "Escape") {
     e.stopPropagation();
     // Esc 取非破坏性选项：未保存确认 → 取消；放弃比较 → 继续处理
-    choose(confirmDialog.mode === "unsaved" ? "cancel" : "continue");
+    e.preventDefault();
+    choose(confirmDialog.mode === "discard" ? "continue" : "cancel");
     return;
   }
   if (e.key === "Tab") {
@@ -62,20 +70,22 @@ watch(
       ref="root"
       role="alertdialog"
       aria-modal="true"
-      :aria-label="confirmDialog.mode === 'unsaved' ? t('unsavedDialogTitle') : t('discardReviewTitle')"
+      :aria-label="confirmDialog.mode === 'discard' ? t('discardReviewTitle') : t('unsavedDialogTitle')"
       tabindex="-1"
       class="w-[420px] rounded-lg border border-neutral-300 bg-white p-5 shadow-xl outline-none dark:border-neutral-600 dark:bg-neutral-800"
       @keydown="onKeydown"
     >
       <h2 class="mb-2 text-base font-bold">
-        {{ confirmDialog.mode === "unsaved" ? t("unsavedDialogTitle") : t("discardReviewTitle") }}
+        {{ confirmDialog.mode === "discard" ? t("discardReviewTitle") : t("unsavedDialogTitle") }}
       </h2>
       <p class="mb-4 whitespace-pre-line text-sm text-neutral-600 dark:text-neutral-300">
-        {{ confirmDialog.mode === "unsaved" ? t("unsavedDialogMessage") : t("discardReviewMessage") }}
+        {{ confirmDialog.mode === "launcher-back" ? t("launcherBackMessage") : confirmDialog.mode === "unsaved" ? t("unsavedDialogMessage") : t("discardReviewMessage") }}
       </p>
       <div class="flex justify-end gap-2">
         <template v-if="confirmDialog.mode === 'unsaved'">
           <button
+            title="Esc"
+            aria-keyshortcuts="Escape"
             class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700"
             @click="choose('cancel')"
           >{{ t("cancel") }}</button>
@@ -88,8 +98,24 @@ watch(
             @click="choose('save')"
           >{{ t("saveAndContinue") }}</button>
         </template>
+        <template v-else-if="confirmDialog.mode === 'launcher-back'">
+          <button
+            title="Esc"
+            aria-keyshortcuts="Escape"
+            class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700"
+            @click="choose('cancel')"
+          >{{ t("cancel") }}</button>
+          <button
+            title="Enter"
+            aria-keyshortcuts="Enter"
+            class="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-800 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-900/50"
+            @click="choose('discard')"
+          >{{ t("discardAndBack") }}</button>
+        </template>
         <template v-else>
           <button
+            title="Esc"
+            aria-keyshortcuts="Escape"
             class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700"
             @click="choose('continue')"
           >{{ t("continueReviewing") }}</button>

@@ -10,7 +10,9 @@ import { t, translateApiError } from "../lib/i18n";
 import {
   DEFAULT_KEY_BINDINGS, formatKeybinding, matchesKeybinding, type KeyBindings,
 } from "../lib/keybindings";
-import { launcherBackAction, type LauncherStage } from "../lib/launcher-navigation";
+import { launcherBackAction, snapshotVariables, variablesChanged, type LauncherStage } from "../lib/launcher-navigation";
+import { confirmDialog, openLauncherBackDialog } from "../lib/confirm-dialog";
+import ConfirmLeaveDialog from "./ConfirmLeaveDialog.vue";
 import { renderPreviewMarkdown } from "../lib/markdown-preview";
 import { MutationQueue } from "../lib/mutation-queue";
 
@@ -24,6 +26,9 @@ const selectedId = ref<string | null>(null);
 const selIndex = ref(0);
 const varValues = ref<Record<string, string | string[]>>({});
 const resultText = ref("");
+let initialVariables: Record<string, string | string[]> = {};
+let generatedText = "";
+let returning = false;
 const previewOpen = ref(false);
 const previewHtml = computed(() => renderPreviewMarkdown(resultText.value));
 const previewWrites = new MutationQueue();
@@ -192,6 +197,7 @@ function choose(p: Prompt) {
     if (v.type === "multi") active[v.name] = 0;
   }
   varValues.value = values;
+  initialVariables = snapshotVariables(values);
   activeOption.value = active;
   stage.value = "variables";
   errorMessage.value = "";
@@ -242,6 +248,7 @@ function onOptionKeydown(v: ParsedVar, e: KeyboardEvent) {
 function generate() {
   if (!selected.value) return;
   resultText.value = renderBody(selected.value.body, varValues.value);
+  generatedText = resultText.value;
   stage.value = "result";
   errorMessage.value = "";
   focusedVar.value = null;
@@ -292,7 +299,35 @@ async function copyAndClose() {
   }
 }
 
+async function requestBack() {
+  if (returning || confirmDialog.open || copying.value) return;
+  returning = true;
+  try {
+    const from = stage.value;
+    const changed = from === "variables"
+      ? variablesChanged(varValues.value, initialVariables)
+      : from === "result" && resultText.value !== generatedText;
+    if (changed && await openLauncherBackDialog() !== "discard") return;
+    if (stage.value !== from) return;
+    const action = launcherBackAction(from);
+    if (action === "hide") await api.hideMain();
+    else if (action === "reset") {
+      varValues.value = snapshotVariables(initialVariables);
+      resultText.value = "";
+      generatedText = "";
+      reset();
+    } else {
+      resultText.value = generatedText;
+      stage.value = "variables";
+      void nextTick(() => document.querySelector<HTMLElement>(".variable-input")?.focus());
+    }
+  } finally {
+    returning = false;
+  }
+}
+
 function onKeydown(e: KeyboardEvent) {
+  if (confirmDialog.open || returning) return;
   if (e.isComposing) return;
   if (e.key === "Tab") keyboardNav.value = true;
   const target = e.target as HTMLElement | null;
@@ -304,10 +339,7 @@ function onKeydown(e: KeyboardEvent) {
 
   if (matchesKeybinding(e, bindings.value.back)) {
     e.preventDefault();
-    const action = launcherBackAction(stage.value);
-    if (action === "hide") api.hideMain();
-    else if (action === "reset") reset();
-    else stage.value = "variables";
+    void requestBack();
     return;
   }
   if (matchesKeybinding(e, bindings.value.advance)) {
@@ -471,7 +503,7 @@ function onKeydown(e: KeyboardEvent) {
           />
         </div>
         <div class="flex justify-end gap-2 pt-2">
-          <button tabindex="-1" class="rounded-md px-3 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="reset">{{ t("back") }}</button>
+          <button tabindex="-1" :title="formatKeybinding(bindings.back)" class="rounded-md px-3 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="requestBack">{{ t("back") }}</button>
           <button tabindex="-1" class="rounded-md bg-blue-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-600" @click="generate">{{ t("generatePrompt") }}</button>
         </div>
       </div>
@@ -519,7 +551,7 @@ function onKeydown(e: KeyboardEvent) {
         </div>
         <div class="mt-3 flex justify-end gap-2">
           <p v-if="errorMessage" class="mr-auto self-center text-xs text-red-500">{{ errorMessage }}</p>
-          <button tabindex="-1" class="rounded-md px-3 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="stage = 'variables'">{{ t("back") }}</button>
+          <button tabindex="-1" :title="formatKeybinding(bindings.back)" class="rounded-md px-3 py-1.5 text-sm text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="requestBack">{{ t("back") }}</button>
           <button
             tabindex="-1"
             :disabled="copying"
@@ -534,5 +566,6 @@ function onKeydown(e: KeyboardEvent) {
         {{ resultKeyHint }}
       </div>
     </div>
+    <ConfirmLeaveDialog />
   </div>
 </template>

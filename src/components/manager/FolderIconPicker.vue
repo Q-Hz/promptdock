@@ -49,7 +49,7 @@ onUnmounted(() => { origin?.focus({ preventScroll: true }); });
         </div>
         <div class="mt-4 flex items-center gap-2 text-xs">
           <button type="button" :disabled="busy" class="mr-auto rounded px-2 py-1.5 text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-700" @click="draft = defaultAppearance(sectionKey)">{{ t('restoreFolderIcon') }}</button>
-          <button type="button" :disabled="busy" class="rounded px-3 py-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="emit('cancel')">{{ t('cancel') }}</button>
+          <button type="button" title="Esc" aria-keyshortcuts="Escape" :disabled="busy" class="rounded px-3 py-1.5 hover:bg-neutral-100 dark:hover:bg-neutral-700" @click="emit('cancel')">{{ t('cancel') }}</button>
           <button type="button" :disabled="busy" class="rounded bg-neutral-900 px-3 py-1.5 text-white disabled:opacity-50 dark:bg-neutral-100 dark:text-neutral-900" @click="emit('save', { ...draft })">{{ t('folderIconDone') }}</button>
         </div>
       </div>

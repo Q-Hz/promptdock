@@ -217,7 +217,7 @@ function onModalKeydown(event: KeyboardEvent) {
           <h2 id="settings-dialog-title" class="settings-title">{{ t("settingsTitle") }}</h2>
           <p class="settings-subtitle">{{ t("settingsSubtitle") }}</p>
         </div>
-        <button type="button" class="icon-button" :aria-label="t('close')" :title="t('close')" @click="cancel">
+        <button type="button" class="icon-button" :aria-label="t('close')" :title="`${t('close')} (Esc)`" aria-keyshortcuts="Escape" @click="cancel">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 7 10 10M17 7 7 17" /></svg>
         </button>
       </header>
@@ -420,7 +420,7 @@ function onModalKeydown(event: KeyboardEvent) {
 
       <footer class="settings-footer">
         <div class="footer-actions">
-          <button type="button" class="text-button" @click="cancel">{{ t("cancel") }}</button>
+          <button type="button" title="Esc" aria-keyshortcuts="Escape" class="text-button" @click="cancel">{{ t("cancel") }}</button>
           <button type="button" class="primary-button" @click="save">
             <svg v-if="savedTip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>
             {{ savedTip ? t("saved") : t("save") }}

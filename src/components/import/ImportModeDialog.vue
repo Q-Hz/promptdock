@@ -53,7 +53,8 @@ function onKeydown(event: KeyboardEvent) {
           type="button"
           class="rounded px-1.5 text-xl leading-none text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500 dark:hover:bg-neutral-700 dark:hover:text-white"
           :aria-label="t('cancelImport')"
-          :title="t('cancelImport')"
+          :title="`${t('cancelImport')} (Esc)`"
+          aria-keyshortcuts="Escape"
           @click="emit('cancel')"
         >×</button>
       </div>

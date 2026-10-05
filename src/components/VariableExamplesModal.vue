@@ -37,7 +37,7 @@ onMounted(() => void nextTick(() => closeButton.value?.focus()));
           <h2 id="variable-examples-title" class="text-lg font-bold">{{ t("variableExamplesTitle") }}</h2>
           <p class="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{{ t("variableExamplesIntro") }}</p>
         </div>
-        <button ref="closeButton" type="button" class="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-semibold hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="emit('close')">{{ t("close") }}</button>
+        <button ref="closeButton" type="button" title="Esc" aria-keyshortcuts="Escape" class="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-semibold hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="emit('close')">{{ t("close") }}</button>
       </header>
       <div class="min-h-0 overflow-y-auto p-5">
         <div class="overflow-hidden rounded-xl border border-neutral-200 dark:border-neutral-700">

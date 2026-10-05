@@ -5,7 +5,7 @@ export type DiscardChoice = "continue" | "discard";
 
 interface ConfirmDialogState {
   open: boolean;
-  mode: "unsaved" | "discard";
+  mode: "unsaved" | "discard" | "launcher-back";
   resolve: ((choice: DialogChoice | DiscardChoice) => void) | null;
 }
 
@@ -33,6 +33,10 @@ export function openUnsavedDialog(): Promise<DialogChoice> {
 // 放弃比较进度确认：继续处理 / 放弃并退出（PRD 7.6）
 export function openDiscardDialog(): Promise<DiscardChoice> {
   return open("discard") as Promise<DiscardChoice>;
+}
+
+export function openLauncherBackDialog(): Promise<DialogChoice> {
+  return open("launcher-back") as Promise<DialogChoice>;
 }
 
 export function settleConfirmDialog(choice: DialogChoice | DiscardChoice) {
