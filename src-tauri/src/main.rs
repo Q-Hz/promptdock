@@ -962,14 +962,23 @@ fn set_folder_appearance(
 #[tauri::command]
 fn get_ui_prefs(state: tauri::State<DbState>, key: String) -> Result<String, String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
-    Ok(conn
-        .query_row("SELECT v FROM ui_prefs WHERE k=?1", [&key], |r| r.get(0))
-        .unwrap_or_default())
+    read_ui_pref(&conn, &key)
+}
+
+fn read_ui_pref(conn: &Connection, key: &str) -> Result<String, String> {
+    conn.query_row("SELECT v FROM ui_prefs WHERE k=?1", [&key], |r| r.get(0))
+        .optional()
+        .map(|value| value.unwrap_or_default())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn set_ui_prefs(state: tauri::State<DbState>, key: String, value: String) -> Result<(), String> {
     let conn = state.0.lock().map_err(|e| e.to_string())?;
+    write_ui_pref(&conn, &key, &value)
+}
+
+fn write_ui_pref(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT OR REPLACE INTO ui_prefs (k,v) VALUES (?1,?2)",
         params![key, value],
@@ -1764,6 +1773,9 @@ pub struct PendingUpdate(pub Mutex<Option<tauri_plugin_updater::Update>>);
 pub struct CloseGate(pub Mutex<Option<Sender<bool>>>);
 pub struct QuitGate(pub Mutex<Option<Sender<bool>>>);
 pub struct ManagerGuardReady(pub AtomicBool);
+pub struct LauncherQuitGate(pub Mutex<Option<Sender<bool>>>);
+pub struct LauncherGuardReady(pub AtomicBool);
+pub struct QuitInProgress(pub AtomicBool);
 
 fn finish_manager_close(app: &AppHandle, allow: bool) {
     if !allow {
@@ -1827,12 +1839,18 @@ fn request_manager_close(app: AppHandle) {
 }
 
 fn request_app_quit(app: AppHandle) {
+    if app.state::<QuitInProgress>().0.swap(true, Ordering::SeqCst) {
+        return;
+    }
     // Windows 关闭管理器后窗口会被销毁；窗口不存在就不可能仍持有编辑草稿。
     if app.get_webview_window("manager").is_none() {
-        app.exit(0);
+        std::thread::spawn(move || finish_app_quit(app));
         return;
     }
     if !app.state::<ManagerGuardReady>().0.load(Ordering::SeqCst) {
+        app.state::<QuitInProgress>()
+            .0
+            .store(false, Ordering::SeqCst);
         open_manager(app);
         return;
     }
@@ -1840,9 +1858,15 @@ fn request_app_quit(app: AppHandle) {
     {
         let gate = app.state::<QuitGate>();
         let Ok(mut slot) = gate.0.lock() else {
+            app.state::<QuitInProgress>()
+                .0
+                .store(false, Ordering::SeqCst);
             return;
         };
         if slot.is_some() {
+            app.state::<QuitInProgress>()
+                .0
+                .store(false, Ordering::SeqCst);
             return;
         }
         *slot = Some(tx);
@@ -1853,6 +1877,9 @@ fn request_app_quit(app: AppHandle) {
         if let Ok(mut slot) = app.state::<QuitGate>().0.lock() {
             *slot = None;
         }
+        app.state::<QuitInProgress>()
+            .0
+            .store(false, Ordering::SeqCst);
         return;
     }
     let app = app.clone();
@@ -1862,9 +1889,60 @@ fn request_app_quit(app: AppHandle) {
             *slot = None;
         }
         if allow {
-            app.exit(0);
+            finish_app_quit(app);
+        } else {
+            app.state::<QuitInProgress>()
+                .0
+                .store(false, Ordering::SeqCst);
         }
     });
+}
+
+fn finish_app_quit(app: AppHandle) {
+    // This also runs when the manager has already been closed. The hidden launcher
+    // must finish its queued preference writes before its WebView is destroyed.
+    if flush_launcher_preferences(&app) {
+        app.exit(0);
+    } else {
+        app.state::<QuitInProgress>()
+            .0
+            .store(false, Ordering::SeqCst);
+        if let Some(win) = app.get_webview_window("main") {
+            // Keep the current page so the save error remains visible.
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    }
+}
+
+fn flush_launcher_preferences(app: &AppHandle) -> bool {
+    if app.get_webview_window("main").is_none()
+        || !app.state::<LauncherGuardReady>().0.load(Ordering::SeqCst)
+    {
+        return true;
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    let gate = app.state::<LauncherQuitGate>();
+    {
+        let Ok(mut slot) = gate.0.lock() else {
+            return false;
+        };
+        if slot.is_some() {
+            return false;
+        }
+        *slot = Some(tx);
+    }
+    if app.emit_to("main", "launcher-quit-requested", ()).is_err() {
+        if let Ok(mut slot) = gate.0.lock() {
+            *slot = None;
+        }
+        return false;
+    }
+    let allow = rx.recv().unwrap_or(false);
+    if let Ok(mut slot) = gate.0.lock() {
+        *slot = None;
+    }
+    allow
 }
 
 #[tauri::command]
@@ -1895,6 +1973,36 @@ fn resolve_quit(app: AppHandle, allow: bool) -> Result<(), String> {
         let _ = tx.send(allow);
     }
     Ok(())
+}
+
+#[tauri::command]
+fn resolve_launcher_quit(app: AppHandle, allow: bool) -> Result<(), String> {
+    let tx = app
+        .state::<LauncherQuitGate>()
+        .0
+        .lock()
+        .map_err(|e| e.to_string())?
+        .as_ref()
+        .cloned();
+    if let Some(tx) = tx {
+        let _ = tx.send(allow);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_launcher_guard_ready(app: AppHandle, ready: bool) {
+    app.state::<LauncherGuardReady>()
+        .0
+        .store(ready, Ordering::SeqCst);
+    if !ready {
+        // A reloaded launcher must not leave an exit handshake waiting forever.
+        if let Ok(mut slot) = app.state::<LauncherQuitGate>().0.lock() {
+            if let Some(tx) = slot.take() {
+                let _ = tx.send(false);
+            }
+        }
+    }
 }
 
 #[tauri::command]
@@ -2049,6 +2157,8 @@ pub fn run() {
             commit_import,
             resolve_close,
             resolve_quit,
+            resolve_launcher_quit,
+            set_launcher_guard_ready,
             set_manager_guard_ready,
             check_for_updates,
             install_update
@@ -2064,6 +2174,9 @@ pub fn run() {
             app.manage(CloseGate(Mutex::new(None)));
             app.manage(QuitGate(Mutex::new(None)));
             app.manage(ManagerGuardReady(AtomicBool::new(false)));
+            app.manage(LauncherQuitGate(Mutex::new(None)));
+            app.manage(LauncherGuardReady(AtomicBool::new(false)));
+            app.manage(QuitInProgress(AtomicBool::new(false)));
             app.manage(HotkeyRegistrationState(AtomicBool::new(false)));
 
             let settings = get_settings_inner(&app_handle);
@@ -2141,6 +2254,34 @@ mod tests {
     use std::collections::HashSet;
 
     #[test]
+    fn launcher_preview_choice_survives_database_reopen_and_initialization() {
+        let path =
+            std::env::temp_dir().join(format!("promptdock-preview-{}.db", uuid::Uuid::new_v4()));
+        let key = "launcher.markdownPreviewOpen";
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            initialize_db(&mut conn).unwrap();
+            assert_eq!(read_ui_pref(&conn, key).unwrap(), "");
+        }
+        for choice in ["true", "false"] {
+            {
+                let conn = Connection::open(&path).unwrap();
+                write_ui_pref(&conn, key, choice).unwrap();
+            }
+            let mut conn = Connection::open(&path).unwrap();
+            initialize_db(&mut conn).unwrap();
+            assert_eq!(read_ui_pref(&conn, key).unwrap(), choice);
+        }
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn ui_preference_read_errors_are_not_treated_as_missing_values() {
+        let conn = Connection::open_in_memory().unwrap();
+        assert!(read_ui_pref(&conn, "launcher.markdownPreviewOpen").is_err());
+    }
+
+    #[test]
     fn launcher_preview_width_respects_monitor_space_and_restores_manual_width() {
         let mut geometry = LauncherGeometry::default();
         assert_eq!(geometry.target_width(false, Some(1600.0)), 640.0);
@@ -2200,9 +2341,60 @@ mod tests {
     }
 
     #[test]
+    fn fresh_library_seeds_the_current_bilingual_syntax_guides() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_db(&mut conn).unwrap();
+        let prompts = read_prompts(&conn).unwrap();
+        for (title, guide) in [
+            (
+                "提示词标准化",
+                include_str!("../../examples/promptdock-syntax-guide.zh.md"),
+            ),
+            (
+                "Prompt Standardization",
+                include_str!("../../examples/promptdock-syntax-guide.en.md"),
+            ),
+        ] {
+            let prompt = prompts.iter().find(|p| p.title == title).unwrap();
+            assert_eq!(
+                prompt.body.replace("\r\n", "\n"),
+                guide.replace("\r\n", "\n")
+            );
+            assert!(prompt.body.contains("{{source_prompt}}"));
+            assert!(prompt.body.contains("{{note_language=["));
+            assert!(prompt.body.contains("{{note}}"));
+        }
+    }
+
+    #[test]
     fn import_accepts_promptdeck_and_promptdock_v1() {
         assert!(validate_import_document(&import_document(Some("promptdeck"), 1)).is_ok());
         assert!(validate_import_document(&import_document(Some("promptdock"), 1)).is_ok());
+    }
+
+    #[test]
+    fn optional_snippet_acceptance_file_is_importable_as_a_new_prompt() {
+        let content = include_str!("../../examples/optional-snippets-test.json");
+        let file = import_logic::parse_import_content(content).unwrap();
+        assert_eq!(file.prompts.len(), 1);
+        let prompt = &file.prompts[0];
+        assert_eq!(prompt.title, "可选片段功能验收");
+        assert!(prompt.body.contains("{{@附加修复}}"));
+        assert!(prompt.body.contains(":::option [x] 修复公式标题"));
+        assert!(prompt.body.contains("{{符号=u}}"));
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_db(&mut conn).unwrap();
+        let locals = read_prompts(&conn).unwrap();
+        let precheck = import_logic::precheck(&file.prompts, &locals, file.organization.as_ref());
+        assert_eq!(precheck.new_count, 1);
+        assert_eq!(precheck.conflict_count, 0);
+        let tx = conn.transaction().unwrap();
+        let result = import_logic::commit_import_impl(&tx, &precheck, &[], 1).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(result.inserted, 1);
+        let imported = read_prompt_by_id(&conn, &prompt.id).unwrap();
+        assert_eq!(imported.body, prompt.body);
+        assert_eq!(read_prompts(&conn).unwrap().len(), locals.len() + 1);
     }
 
     #[test]

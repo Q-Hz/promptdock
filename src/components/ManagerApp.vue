@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
-  api, filterPrompts, parseVariables,
+  api, filterPrompts,
   type FolderUpdate, type ImportDecision, type ImportPrecheck, type ImportResult, type Organization, type Prompt,
 } from "../lib/api";
 import {
@@ -18,6 +18,9 @@ import { formatKeybinding, matchesKeybinding } from "../lib/keybindings";
 import SettingsModal from "./SettingsModal.vue";
 import InterfaceTour from "./InterfaceTour.vue";
 import VariableExamplesModal from "./VariableExamplesModal.vue";
+import TemplateDiagnostics from "./TemplateDiagnostics.vue";
+import PromptBodyEditor from "./PromptBodyEditor.vue";
+import { parseSnippetTemplate, templateDiagnostics, templateVariableHints } from "../lib/optional-snippets";
 import ConfirmLeaveDialog from "./ConfirmLeaveDialog.vue";
 import ImportComparePage from "./import/ImportComparePage.vue";
 import ImportModeDialog from "./import/ImportModeDialog.vue";
@@ -64,7 +67,9 @@ const variableExamplesButton = ref<HTMLButtonElement | null>(null);
 const settingsModal = ref<InstanceType<typeof SettingsModal> | null>(null);
 
 const editing = ref<Prompt>(emptyPrompt());
-const editorShowVarHint = computed(() => parseVariables(editing.value.body));
+const editorTemplate = computed(() => parseSnippetTemplate(editing.value.body));
+const editorShowVarHint = computed(() => templateVariableHints(editorTemplate.value));
+const editorDiagnostics = computed(() => templateDiagnostics(editorTemplate.value));
 
 const importSession = ref<ImportPrecheck | null>(null);
 const importing = ref(false);
@@ -1606,7 +1611,7 @@ async function handleQuitRequest() {
 
               <div class="min-h-0 flex-1">
                 <ResizableSplit
-                  :second-collapsed="editorShowVarHint.length === 0"
+                  :second-collapsed="editorShowVarHint.length === 0 && editorTemplate.groups.length === 0 && editorDiagnostics.length === 0"
                   axis="rows"
                   unit="ratio"
                   :label="t('resizeEditorBody')"
@@ -1618,11 +1623,10 @@ async function handleQuitRequest() {
                 >
                   <template #first>
                     <div data-onboarding-target="variables" class="flex h-full min-h-0 flex-col gap-1.5">
-                      <textarea
-                        data-manager-field
+                      <PromptBodyEditor
                         v-model="editing.body"
                         :placeholder="t('bodyPlaceholder')"
-                        class="min-h-0 w-full flex-1 resize-none rounded-md border border-neutral-300 bg-transparent p-3 font-mono text-sm leading-relaxed outline-none focus:border-blue-400 dark:border-neutral-600"
+                        :label="t('fieldBody')"
                       />
                       <div class="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
                         <span>{{ t("variableHelpText") }}</span>
@@ -1637,7 +1641,9 @@ async function handleQuitRequest() {
                   </template>
                   <template #second>
                     <div class="h-full overflow-y-auto pt-2 text-xs text-neutral-400">
+                      <TemplateDiagnostics :diagnostics="editorDiagnostics" class="mb-2" />
                       {{ t("variablesDetected") }}
+                      <span v-for="g in editorTemplate.groups" :key="`group:${g.line}`" class="mr-1.5 inline-block rounded bg-blue-100 px-1.5 py-0.5 font-mono text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">@{{ g.name }} ({{ t('snippetGroupHint') }})</span>
                       <span
                         v-for="v in editorShowVarHint"
                         :key="v.name"

@@ -71,7 +71,7 @@ Press `Ctrl + Shift + Space` on Windows or `Command + Shift + Space` on macOS (d
 
 ### 2. Fill in variables and generate
 
-When you select a prompt that contains variables, a form opens so you can fill the preset placeholders. Variables are defined in the prompt content, and four kinds are available, each rendered as a different control:
+When you select a prompt that contains variables, a form opens so you can fill the preset placeholders. Prompt content supports four basic variable kinds and optional snippet groups for longer content:
 
 | Variable type | Syntax example | Rendered as |
 | :--- | :--- | :--- |
@@ -79,10 +79,11 @@ When you select a prompt that contains variables, a form opens so you can fill t
 | Text variable with default | `{{source_prompt=test}}` | Text input (pre-filled) |
 | Single choice | `{{note_language=[answer in Chinese\|answer in English]}}` | Dropdown |
 | Multi-select | `{{tone+=[formal\|polite\|friendly]}}` | Checkboxes (selected values joined by `, `) |
+| Optional snippets | `{{@checks}}`, with definitions in the body | One-option toggle or multiple choices, with expandable full text |
 
 ![Launcher: filling in variables](README_attachment/en/launcher-variables-en.png)
 
-Once the variables are filled in, you can preview the final prompt. Choose **Copy and Close** when it looks good, and the result goes to the clipboard while the window hides itself.
+Choose **Open preview** while filling variables to see the result update as you type and select snippets. The preview sits beside the form in wide windows and below it in narrow windows, and can be collapsed at any time. Clicking outside keeps the form and result pages open; use Esc to step back and exit. After generating, choose **Copy Prompt** to copy the result and hide the window.
 
 ![Launcher: generated result](README_attachment/en/launcher-result-en.png)
 
@@ -92,7 +93,7 @@ Open the manager from the tray menu to create, edit, and delete prompts, and org
 
 ![Manager: prompt list](README_attachment/en/manager-list-en.png)
 
-Click **New** to add a prompt: enter a title and content, optionally set tags, a folder, and favorite status, and use variable syntax in the content.
+Click **New** to add a prompt: enter a title and content, optionally set tags, a folder, and favorite status, and use variable syntax in the content. The body editor uses text colors for variable syntax and a subtle background for each entire optional snippet definition, from `:::options` through `:::end`.
 
 ### 4. Prompt import
 
@@ -115,13 +116,45 @@ Declare variables in the prompt content with double curly braces `{{ }}`; the la
 - **Single choice** — `{{note_language=[answer in Chinese|answer in English]}}`: candidates are separated by `|` inside the brackets and picked from a dropdown.
 - **Multi-select** — `{{tone+=[formal|polite|friendly]}}`: pick multiple values via checkboxes; selected values are joined by `, ` by default, and you can use `~` to choose a custom separator (supports `\n` and `\t` escapes), e.g. `{{lines+=[a|b|c]~\n}}` puts each value on its own line.
 
+### Optional snippet groups
+
+Write `{{@groupName}}` where selected content belongs, then define the snippets at the bottom of the same prompt body:
+
+```text
+Please review the following content.
+{{@checks}}
+Return your review.
+
+:::options checks
+:::option [x] Explain changes
+- Explain the main changes in {{language=English}}.
+
+:::option [ ] Check formatting
+- Check heading and list formatting.
+  Preserve necessary indentation.
+:::end
+```
+
+- Put each control marker on its own line: `:::options name` starts a group and `:::end` closes it. Group names must be unique.
+- `:::option [x] Title` is selected by default; `:::option [ ] Title` is initially unselected. The following lines belong to that snippet until the next `:::option` or `:::end`. One option acts as a toggle; multiple options form a multi-select group.
+- The launcher shows short titles with expandable, read-only full text. Selecting a snippet reveals its variable fields; collapsing the text keeps those fields visible. All four basic variable kinds work inside snippets. Nested groups and group references inside snippets are not supported.
+- Default selections follow definition order. Later selections follow click order; unchecking and rechecking appends the option. Boundary blank lines are removed, interior blank lines and indentation are retained, and snippets are joined with one line break.
+- Repeated references to the same group share one selection and insert the same result. Same-name ordinary variables share one field. Each group maintains its own snippet content.
+- Unchecking hides fields and caches their values for this invocation. Reselecting restores them. Inactive values neither enter the result nor independently trigger the back-navigation confirmation. A new invocation restores template defaults.
+- All definitions are removed from the result. An empty standalone reference removes its whole line; an empty inline reference leaves surrounding text intact.
+- The manager reports syntax errors with line numbers while allowing saves. It also warns about potential same-name variable conflicts. Generation is blocked only for syntax errors or conflicting definitions currently in use. Same-name declarations must agree on type, default, choices and multi-select separator.
+
 ### Write prompts faster with Prompt Standardization
 
-PromptDock ships with a built-in template named **提示词标准化 (Prompt Standardization)**. Paste one of your everyday prompts into it and send it to an AI assistant. The assistant will rewrite it into a well-formed prompt that follows PromptDock's variable syntax. Save the result as a new prompt.
+PromptDock ships with **Prompt Standardization** and **提示词标准化**, complete syntax guides you can send to an AI assistant. They explain the four basic variable forms, optional snippet groups, shared fields, defaults and validation rules.
 
-1. Open **提示词标准化 (Prompt Standardization)** and enter the original prompt you want to improve.
-2. Ask an AI assistant to rewrite it into a clearer, more consistent prompt based on your requirements.
-3. Add the optimized prompt to Prompt Manager, then assign tags, a folder, favorite status, and variables as needed.
+1. Launch **Prompt Standardization**, enter the original prompt, choose the output language, add notes, then generate and send the complete text to your AI assistant.
+2. With an original prompt, the AI rewrites it directly using PromptDock syntax. Leave it empty to have the AI acknowledge the guide and wait for your next task.
+3. Save the resulting prompt body in the manager, then fill in or select its values when launching it.
+
+The installation defaults contain the [English guide](examples/promptdock-syntax-guide.en.md) and [Chinese guide](examples/promptdock-syntax-guide.zh.md), including original-prompt, output-language and notes fields. Teaching notation preserves the examples when launched and requires real double-brace syntax in the AI's generated templates. Existing saved library entries are not automatically overwritten.
+
+The manager's “View variable examples” opens the variable syntax guide, with four columns for use cases, prompt syntax, launcher controls and example output. Control illustrations are preserved, and narrow windows scroll horizontally for comparison. Append the [importable test JSON](examples/optional-snippets-test.json), then follow the [test steps in Chinese](examples/README.md) to check optional snippets.
 
 ## Data and privacy
 

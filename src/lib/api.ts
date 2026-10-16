@@ -165,6 +165,8 @@ export const api = {
     invoke("commit_import", { precheck, decisions }),
   resolveClose: (allow: boolean): Promise<void> => invoke("resolve_close", { allow }),
   resolveQuit: (allow: boolean): Promise<void> => invoke("resolve_quit", { allow }),
+  resolveLauncherQuit: (allow: boolean): Promise<void> => invoke("resolve_launcher_quit", { allow }),
+  setLauncherGuardReady: (ready: boolean): Promise<void> => invoke("set_launcher_guard_ready", { ready }),
   setManagerGuardReady: (ready: boolean): Promise<void> => invoke("set_manager_guard_ready", { ready }),
   checkForUpdates: (): Promise<UpdateInfo | null> => invoke("check_for_updates"),
   installUpdate: (): Promise<void> => invoke("install_update"),
