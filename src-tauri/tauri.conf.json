@@ -14,6 +14,7 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "PromptDock",
         "width": 640,
         "height": 480,
@@ -32,6 +33,7 @@
       },
       {
         "label": "manager",
+        "create": false,
         "dragDropEnabled": false,
         "title": "PromptDock",
         "width": 1080,

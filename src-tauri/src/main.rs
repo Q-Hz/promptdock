@@ -2213,6 +2213,13 @@ pub fn run() {
                 .0
                 .store(hotkey_registered, Ordering::SeqCst);
             let _ = apply_autostart(&app_handle, settings.autostart);
+
+            // Tauri creates automatic windows before setup, and WebView2 can
+            // dispatch IPC while another window is still being built. Defer both
+            // configured windows until all backend state and the hotkey are ready.
+            for config in &app.config().app.windows {
+                WebviewWindowBuilder::from_config(app, config)?.build()?;
+            }
             apply_window_preferences(&app_handle, &settings);
 
             if settings.auto_check_update {
@@ -2252,6 +2259,25 @@ fn main() {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn startup_webviews_wait_for_backend_initialization() {
+        let config: tauri::Config =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        assert_eq!(config.app.windows.len(), 2);
+        for label in ["main", "manager"] {
+            let window = config
+                .app
+                .windows
+                .iter()
+                .find(|window| window.label == label)
+                .unwrap();
+            assert!(
+                !window.create,
+                "{label} must wait for setup: WebView IPC can run before backend state is managed"
+            );
+        }
+    }
 
     #[test]
     fn launcher_preview_choice_survives_database_reopen_and_initialization() {
