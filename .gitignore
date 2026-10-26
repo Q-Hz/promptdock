@@ -24,6 +24,7 @@ Thumbs.db
 
 # 本地文档
 docs/
+worklogs/
 src-tauri/icons/图标文件与使用位置说明.md
 
 # 环境变量和本地配置
