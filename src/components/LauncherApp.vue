@@ -26,6 +26,8 @@ const prompts = ref<Prompt[]>([]);
 const organization = ref<Organization>(emptyOrganization());
 const selectedId = ref<string | null>(null);
 const selIndex = ref(0);
+const searchList = ref<HTMLElement | null>(null);
+let searchScrollTop = 0;
 const snippetSession = ref<SnippetSession | null>(null);
 const varValues = computed(() => snippetSession.value?.values ?? {});
 const expandedSnippets = ref<Record<string, boolean>>({});
@@ -247,24 +249,33 @@ function startLauncherDrag(event: MouseEvent) {
   void getCurrentWindow().startDragging().catch(() => undefined);
 }
 
-function reset() {
+function showSearch() {
   stage.value = "search";
-  query.value = "";
   selectedId.value = null;
   snippetSession.value = null;
   expandedSnippets.value = {};
-  selIndex.value = 0;
   copied.value = false;
   copying.value = false;
   errorMessage.value = "";
   focusedVar.value = null;
   keyboardNav.value = false;
   void nextTick(() => {
-    document.querySelector<HTMLInputElement>("#launcher-input")?.focus();
+    document.querySelector<HTMLInputElement>("#launcher-input")?.focus({ preventScroll: true });
+    if (searchList.value) searchList.value.scrollTop = searchScrollTop;
   });
 }
 
+function reset() {
+  query.value = "";
+  selIndex.value = 0;
+  searchScrollTop = 0;
+  resultText.value = "";
+  generatedText = "";
+  showSearch();
+}
+
 function choose(p: Prompt) {
+  searchScrollTop = searchList.value?.scrollTop ?? 0;
   selectedId.value = p.id;
   snippetSession.value = new SnippetSession(p.body);
   expandedSnippets.value = {};
@@ -409,10 +420,10 @@ async function requestBack() {
     if (stage.value !== from) return;
     const action = launcherBackAction(from);
     if (action === "hide") await api.hideMain();
-    else if (action === "reset") {
+    else if (action === "show-search") {
       resultText.value = "";
       generatedText = "";
-      reset();
+      showSearch();
     } else {
       resultText.value = generatedText;
       stage.value = "variables";
@@ -487,7 +498,7 @@ function onKeydown(e: KeyboardEvent) {
           autofocus
         />
       </div>
-      <div data-launcher-list class="flex-1 overflow-y-auto p-1">
+      <div ref="searchList" data-launcher-list class="flex-1 overflow-y-auto p-1">
         <div v-if="loading" class="p-4 text-center text-sm text-neutral-400">
           {{ t("promptLoading") }}
         </div>

@@ -28,7 +28,7 @@ const example = VARIABLE_EXAMPLE_KINDS.includes(exampleKind) ? variableExample(e
 const prompt = {
   id: "preview-fixture",
   title: example?.title ?? "Markdown 预览验收",
-  body: example?.code ?? variableBodies[params.get("variables") ?? ""] ?? (params.has("back-guard")
+  body: example?.code ?? variableBodies[params.get("variables") ?? ""] ?? (params.has("back-guard") || params.has("search-state")
     ? "# {{text=initial}}\n{{choice=[a|b]}}\n{{multi+=[x|y]}}"
     : "# 验收结论\n\n- **通过**：已完成\n- `待检查`：继续复验\n\n> 以实际结果为准。"),
   tags: ["preview"],
@@ -42,6 +42,9 @@ const prompt = {
 };
 
 const listeners = new Map<string, (event: unknown) => unknown>();
+const fixturePrompts = params.has("search-state")
+  ? Array.from({ length: 45 }, (_, i) => ({ ...prompt, id: `search-${i}`, title: `Search item ${i}`, tags: ["search-state"] }))
+  : [prompt];
 const fixture = {
   settingsDelay: 0,
   remount: () => { launcher.unmount(); launcher = createApp(LauncherApp); launcher.mount("#app"); },
@@ -58,7 +61,7 @@ const fixture = {
   core: {
     invoke: async (command: string, args: Record<string, any> = {}) => {
       if (command === "load_library") return {
-        prompts: [prompt],
+        prompts: fixturePrompts,
         organization: { folderOrder: [], promptOrderByFolder: {}, pinnedOrder: [] },
       };
       if (command === "get_ui_prefs") {

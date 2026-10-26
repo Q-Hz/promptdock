@@ -5,7 +5,7 @@ import { launcherBackAction, snapshotVariables, variablesChanged } from "../src/
 
 test("back navigation can step from result through variables to search", () => {
   assert.equal(launcherBackAction("result"), "show-variables");
-  assert.equal(launcherBackAction("variables"), "reset");
+  assert.equal(launcherBackAction("variables"), "show-search");
   assert.equal(launcherBackAction("search"), "hide");
 });
 

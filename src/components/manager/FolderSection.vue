@@ -42,7 +42,7 @@ const emit = defineEmits<{
   showMore: [];
   collapseList: [];
   drop: [target: DropTarget];
-  folderAction: [action: "up" | "down" | "rename" | "delete" | "icon"];
+  folderAction: [action: "up" | "down" | "rename" | "delete" | "icon" | "create-prompt"];
   updateRename: [value: string];
   commitRename: [];
   cancelRename: [];
@@ -196,6 +196,7 @@ const folderMenuItems = computed(() => [
   { id: "delete", label: t("deleteFolder"), danger: true },
 ]);
 const sectionMenuItems = computed(() => [
+  ...(isSystemSection.value ? [] : [{ id: "create-prompt", label: t("newPromptInFolder") }]),
   ...(isPinnedSection.value ? [] : isSystemSection.value ? folderMenuItems.value.slice(0, 2) : folderMenuItems.value),
   { id: "icon", label: t("changeFolderIcon"), separatorBefore: !isPinnedSection.value },
 ]);
@@ -214,7 +215,7 @@ watch(() => props.renameError, async (error) => {
 });
 
 function onFolderMenu(action: string) {
-  emit("folderAction", action as "up" | "down" | "rename" | "delete" | "icon");
+  emit("folderAction", action as "up" | "down" | "rename" | "delete" | "icon" | "create-prompt");
 }
 
 function onHeaderContextMenu(event: MouseEvent) {

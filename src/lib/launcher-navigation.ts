@@ -21,10 +21,10 @@ export function variablesChanged(current: VariableValues, baseline: VariableValu
   });
 }
 
-export type LauncherBackAction = "hide" | "reset" | "show-variables";
+export type LauncherBackAction = "hide" | "show-search" | "show-variables";
 
 export function launcherBackAction(stage: LauncherStage): LauncherBackAction {
   if (stage === "search") return "hide";
-  if (stage === "variables") return "reset";
+  if (stage === "variables") return "show-search";
   return "show-variables";
 }

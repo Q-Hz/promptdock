@@ -6,6 +6,7 @@ type ResolvedLanguage = Exclude<Language, "auto">;
 const zh = {
   managerTagline: "本地优先的 Prompt 管理与调用工具",
   newPrompt: "+ 新建",
+  newPromptInFolder: "新建提示词",
   import: "导入",
   export: "导出",
   settings: "设置",
@@ -360,6 +361,7 @@ const zh = {
 const en: Record<keyof typeof zh, string> = {
   managerTagline: "A local-first prompt manager and launcher",
   newPrompt: "+ New",
+  newPromptInFolder: "New Prompt",
   import: "Import",
   export: "Export",
   settings: "Settings",

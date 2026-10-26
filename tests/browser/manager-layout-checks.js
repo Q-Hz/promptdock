@@ -1058,7 +1058,7 @@ export async function runFolderCrudChecks() {
   check(body.value === 'Folder CRUD unsaved draft', 'rename preserves the unsaved body draft');
   check(folderField.value === 'Renamed / folder', 'untouched folder draft follows the renamed baseline');
 
-  // Right-click reuses the same menu as the ellipsis entry.
+  // Right-click exposes creation alongside the existing folder operations.
   const renamedHeader = folderSection('RENAMED / FOLDER').querySelector('header');
   renamedHeader.dispatchEvent(new MouseEvent('contextmenu', {
     bubbles: true, cancelable: true, clientX: 120, clientY: 180,
@@ -1067,7 +1067,7 @@ export async function runFolderCrudChecks() {
   let menu = document.querySelector('div[role="menu"]');
   check(!!menu, 'right-click opens the custom folder menu');
   const labels = [...menu.querySelectorAll('button[role="menuitem"]')].map((button) => button.textContent.trim());
-  check(labels.join('|') === '上移|下移|重命名|删除文件夹|更改图标', `right-click menu actions: ${labels.join('|')}`);
+  check(labels.join('|') === '新建提示词|上移|下移|重命名|删除文件夹|更改图标', `right-click menu actions: ${labels.join('|')}`);
 
   // Cancel is the safe path; accepting then moves members to the system group.
   window.managerFixture.answerDialog(false);

@@ -158,6 +158,7 @@ function performSave(): Promise<boolean> {
     editorFolderError.value = "";
     saving.value = true;
     try {
+      const creating = !editing.value.id;
       const saved = await api.savePrompt(editing.value);
       await reload();
       editing.value = JSON.parse(JSON.stringify(saved));
@@ -165,6 +166,7 @@ function performSave(): Promise<boolean> {
       baseline.value = snapshotFromPrompt(saved);
       baselinePrompt.value = JSON.parse(JSON.stringify(saved));
       titleError.value = false;
+      if (creating) query.value = "";
       await revealPrompt(saved.id, saved.folder);
       return true;
     } catch (error) {
@@ -589,7 +591,11 @@ async function requestDeleteFolder(name: string) {
   }
 }
 
-async function onFolderAction(action: "up" | "down" | "rename" | "delete" | "icon", sectionKey: string) {
+async function onFolderAction(action: "up" | "down" | "rename" | "delete" | "icon" | "create-prompt", sectionKey: string) {
+  if (action === "create-prompt") {
+    if (sectionKey && sectionKey !== PINNED_SECTION_KEY) newPrompt(sectionKey);
+    return;
+  }
   if (action === "icon") {
     iconError.value = "";
     iconPicker.value = { key: sectionKey, title: sectionKey === PINNED_SECTION_KEY ? t("pinnedSection") : sectionKey || t("uncategorizedSystem") };
@@ -951,10 +957,11 @@ function select(p: Prompt) {
   });
 }
 
-function newPrompt() {
+function newPrompt(folder = "") {
   void guardUnsaved(() => {
     selectedId.value = null;
-    applyEditor(emptyPrompt());
+    applyEditor({ ...emptyPrompt(), folder });
+    void nextTick(() => document.querySelector<HTMLInputElement>('main input[data-manager-field]')?.focus());
   });
 }
 
@@ -1422,7 +1429,7 @@ async function handleQuitRequest() {
           <h1 class="text-base font-bold">PromptDock</h1>
           <p class="text-[11px] text-neutral-400">{{ t("managerTagline") }}</p>
         </div>
-        <button ref="newPromptButton" data-onboarding-target="create" class="rounded-md bg-blue-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500" @click="newPrompt">{{ t("newPrompt") }}</button>
+        <button ref="newPromptButton" data-onboarding-target="create" class="rounded-md bg-blue-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500" @click="newPrompt()">{{ t("newPrompt") }}</button>
         <button data-manager-secondary-button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="doImport">{{ t("import") }}</button>
         <button data-manager-secondary-button class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="doExport">{{ t("export") }}</button>
         <button data-manager-secondary-button data-onboarding-target="settings" class="rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-700" @click="showSettings = true">⚙ {{ t("settings") }}</button>
