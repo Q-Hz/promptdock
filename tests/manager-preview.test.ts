@@ -83,3 +83,14 @@ test("unrecognizable references and marker-like source remain literal", () => {
   assert.match(result.html, /\{\{=value\}\}/);
   assert.equal(result.hints.length, 1);
 });
+
+test("manager renders formulas in body and snippets without corrupting TeX groups or variables", () => {
+  const source = '# Math {{topic}}\n\n$\\frac{{a}}{{b}}$\n\n\\[x_i^2 + y_i^2 = r^2\\]\n\n{{@math}}\n\n:::options math\n:::option [x] Equation\n$$\\int_0^1 x^2\\,dx$$\n{{note=Explain the result}}\n:::end';
+  const result = buildManagerPreview(source);
+  assert.match(result.html, /class="katex"/);
+  assert.match(result.html, /class="katex-display"/);
+  assert.match(result.groups[0].options[0].html, /class="katex-display"/);
+  assert.ok(result.hints.some(hint => hint.includes('{{topic}}')));
+  assert.ok(result.hints.some(hint => hint.includes('{{note=Explain the result}}')));
+  assert.doesNotMatch(result.html + result.groups[0].options[0].html, /PDVAR|katex-error/);
+});

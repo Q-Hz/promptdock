@@ -1,7 +1,17 @@
 import MarkdownIt from "markdown-it";
+import { katex } from "@mdit/plugin-katex";
 
 export function createPreviewMarkdown() {
   const markdown = new MarkdownIt({ html: false, linkify: false, typographer: false });
+  markdown.use(katex, {
+    delimiters: "all",
+    mathFence: false,
+    allowInlineWithSpace: false,
+    throwOnError: false,
+    trust: false,
+    maxSize: 20,
+    maxExpand: 1000,
+  });
 
   // A preview must not fetch remote images from text that may contain private prompts.
   markdown.renderer.rules.image = (tokens, index) =>

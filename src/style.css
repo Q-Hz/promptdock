@@ -1,3 +1,5 @@
+@import "katex/dist/katex.min.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -205,6 +207,10 @@ body {
 [data-markdown-preview] hr { border-color: #d7dce5; }
 [data-markdown-preview] table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 [data-markdown-preview] :is(th, td) { border: 1px solid #d7dce5; padding: 0.3em 0.55em; text-align: left; }
+[data-markdown-preview] .katex { font-size: 1.1em; }
+[data-markdown-preview] .katex-block { overflow-x: auto; overflow-y: hidden; padding-block: 0.25em; }
+[data-markdown-preview] .katex-block > .katex-display { width: max-content; min-width: 100%; margin: 0; }
+[data-markdown-preview] .katex-error { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .dark [data-markdown-preview] { color: #e1e6ef; }
 .dark [data-markdown-preview] blockquote { border-color: #648ce1; color: #aeb9c9; }

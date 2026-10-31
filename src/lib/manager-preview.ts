@@ -23,10 +23,10 @@ export function buildManagerPreview(source: string): ManagerPreview {
   const markerPattern = () => new RegExp(`${prefix}(\\d+)Z`, "g");
   const restore = (text: string) => text.replace(markerPattern(), (_, index) => originals[Number(index)]);
 
-  // Use Markdown's own block boundaries so examples in fences/indented code stay code.
+  // Code and math content must not become optional snippet definitions.
   const codeLines = new Set<number>();
   for (const token of markdown.parse(protectedSource, {})) {
-    if ((token.type === "fence" || token.type === "code_block") && token.map) {
+    if (["fence", "code_block", "math_block"].includes(token.type) && token.map) {
       for (let line = token.map[0]; line < token.map[1]; line++) codeLines.add(line);
     }
     if (token.type === "inline" && token.map && token.children?.some(child => child.type === "code_inline")) {

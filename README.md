@@ -97,6 +97,8 @@ Click **New** to add a prompt: enter a title and content, optionally set tags, a
 
 Click **Preview** above the body to render the current draft as read-only Markdown. Variables appear as short markers; hover for their original syntax and configuration. Variables inside code stay literal. Snippet references remain in the body, with all definitions and default states collected below. Preview text can be selected and copied, and other fields remain editable. **Save** always stores the original template. The manager remembers its preview mode independently across prompts and app restarts.
 
+The manager preview and the launcher's live variable and result previews support LaTeX math: use `$...$` or `\(...\)` inline, and `$$...$$` or `\[...\]` for display equations. KaTeX renders locally without a network connection. Math syntax inside code stays literal, and saving or copying the prompt preserves its source.
+
 ### 4. Prompt import
 
 You can directly drag in a JSON file to import prompts.

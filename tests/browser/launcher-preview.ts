@@ -5,6 +5,7 @@ import { acceptanceBody, snippetBodies } from "./optional-snippet-fixtures";
 import { setLanguage } from "../../src/lib/i18n";
 import { VARIABLE_EXAMPLE_KINDS, variableExample, type VariableExampleKind } from "../../src/lib/variable-examples";
 import bundledDefaults from "../../src-tauri/src/default-prompts.json";
+import { mathPreviewBody } from "./math-preview-fixture";
 
 const params = new URLSearchParams(location.search);
 setLanguage(params.get("lang") === "en" ? "en" : "zh");
@@ -12,6 +13,7 @@ document.documentElement.classList.toggle("dark", params.get("theme") === "dark"
 const variableBodies: Record<string, string> = {
   ...snippetBodies,
   acceptance: acceptanceBody,
+  math: mathPreviewBody,
   "syntax-guide-zh": bundledDefaults.prompts.find(prompt => prompt.title === "提示词标准化")!.body,
   "syntax-guide-en": bundledDefaults.prompts.find(prompt => prompt.title === "Prompt Standardization")!.body,
   one: "{{text}}",
