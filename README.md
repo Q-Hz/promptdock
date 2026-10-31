@@ -95,6 +95,8 @@ Open the manager from the tray menu to create, edit, and delete prompts, and org
 
 Click **New** to add a prompt: enter a title and content, optionally set tags, a folder, and favorite status, and use variable syntax in the content. The body editor uses text colors for variable syntax and a subtle background for each entire optional snippet definition, from `:::options` through `:::end`.
 
+Click **Preview** above the body to render the current draft as read-only Markdown. Variables appear as short markers; hover for their original syntax and configuration. Variables inside code stay literal. Snippet references remain in the body, with all definitions and default states collected below. Preview text can be selected and copied, and other fields remain editable. **Save** always stores the original template. The manager remembers its preview mode independently across prompts and app restarts.
+
 ### 4. Prompt import
 
 You can directly drag in a JSON file to import prompts.
@@ -152,9 +154,9 @@ PromptDock ships with **Prompt Standardization** and **提示词标准化**, com
 2. With an original prompt, the AI rewrites it directly using PromptDock syntax. Leave it empty to have the AI acknowledge the guide and wait for your next task.
 3. Save the resulting prompt body in the manager, then fill in or select its values when launching it.
 
-The installation defaults contain the [English guide](examples/promptdock-syntax-guide.en.md) and [Chinese guide](examples/promptdock-syntax-guide.zh.md), including original-prompt, output-language and notes fields. Teaching notation preserves the examples when launched and requires real double-brace syntax in the AI's generated templates. Existing saved library entries are not automatically overwritten.
+The installation defaults contain English and Chinese syntax guides, including original-prompt, output-language and notes fields. Teaching notation preserves the examples when launched and requires real double-brace syntax in the AI's generated templates. Existing saved library entries are not automatically overwritten.
 
-The manager's “View variable examples” opens the variable syntax guide, with four columns for use cases, prompt syntax, launcher controls and example output. Control illustrations are preserved, and narrow windows scroll horizontally for comparison. Append the [importable test JSON](examples/optional-snippets-test.json), then follow the [test steps in Chinese](examples/README.md) to check optional snippets.
+The manager's “View variable examples” opens the variable syntax guide, with four columns for use cases, prompt syntax, launcher controls and example output. Control illustrations are preserved, and narrow windows scroll horizontally for comparison.
 
 ## Data and privacy
 

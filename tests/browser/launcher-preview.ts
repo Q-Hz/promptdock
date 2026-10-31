@@ -1,21 +1,19 @@
 import { createApp } from "vue";
 import LauncherApp from "../../src/components/LauncherApp.vue";
 import "../../src/style.css";
-import { snippetBodies } from "./optional-snippet-fixtures";
+import { acceptanceBody, snippetBodies } from "./optional-snippet-fixtures";
 import { setLanguage } from "../../src/lib/i18n";
 import { VARIABLE_EXAMPLE_KINDS, variableExample, type VariableExampleKind } from "../../src/lib/variable-examples";
-import acceptanceDocument from "../../examples/optional-snippets-test.json";
-import syntaxGuideZh from "../../examples/promptdock-syntax-guide.zh.md?raw";
-import syntaxGuideEn from "../../examples/promptdock-syntax-guide.en.md?raw";
+import bundledDefaults from "../../src-tauri/src/default-prompts.json";
 
 const params = new URLSearchParams(location.search);
 setLanguage(params.get("lang") === "en" ? "en" : "zh");
 document.documentElement.classList.toggle("dark", params.get("theme") === "dark");
 const variableBodies: Record<string, string> = {
   ...snippetBodies,
-  acceptance: acceptanceDocument.prompts[0].body,
-  "syntax-guide-zh": syntaxGuideZh,
-  "syntax-guide-en": syntaxGuideEn,
+  acceptance: acceptanceBody,
+  "syntax-guide-zh": bundledDefaults.prompts.find(prompt => prompt.title === "提示词标准化")!.body,
+  "syntax-guide-en": bundledDefaults.prompts.find(prompt => prompt.title === "Prompt Standardization")!.body,
   one: "{{text}}",
   two: "{{source}}\n{{request=default request}}",
   three: "{{one}}\n{{two}}\n{{three}}",

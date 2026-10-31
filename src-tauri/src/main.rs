@@ -2371,20 +2371,13 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize_db(&mut conn).unwrap();
         let prompts = read_prompts(&conn).unwrap();
-        for (title, guide) in [
-            (
-                "提示词标准化",
-                include_str!("../../examples/promptdock-syntax-guide.zh.md"),
-            ),
-            (
-                "Prompt Standardization",
-                include_str!("../../examples/promptdock-syntax-guide.en.md"),
-            ),
-        ] {
+        let bundled = default_prompts();
+        for title in ["提示词标准化", "Prompt Standardization"] {
+            let guide = bundled.iter().find(|p| p.title == title).unwrap();
             let prompt = prompts.iter().find(|p| p.title == title).unwrap();
             assert_eq!(
                 prompt.body.replace("\r\n", "\n"),
-                guide.replace("\r\n", "\n")
+                guide.body.replace("\r\n", "\n")
             );
             assert!(prompt.body.contains("{{source_prompt}}"));
             assert!(prompt.body.contains("{{note_language=["));
@@ -2399,15 +2392,15 @@ mod tests {
     }
 
     #[test]
-    fn optional_snippet_acceptance_file_is_importable_as_a_new_prompt() {
-        let content = include_str!("../../examples/optional-snippets-test.json");
-        let file = import_logic::parse_import_content(content).unwrap();
+    fn optional_snippet_template_is_importable_as_a_new_prompt() {
+        let mut document = import_document(Some("promptdock"), 1);
+        let body = "{{@checks}}\n:::options checks\n:::option [x] Check\nUse {{symbol=u}}.\n:::end";
+        document["prompts"][0]["body"] = serde_json::json!(body);
+        let content = serde_json::to_string(&document).unwrap();
+        let file = import_logic::parse_import_content(&content).unwrap();
         assert_eq!(file.prompts.len(), 1);
         let prompt = &file.prompts[0];
-        assert_eq!(prompt.title, "可选片段功能验收");
-        assert!(prompt.body.contains("{{@附加修复}}"));
-        assert!(prompt.body.contains(":::option [x] 修复公式标题"));
-        assert!(prompt.body.contains("{{符号=u}}"));
+        assert_eq!(prompt.body, body);
         let mut conn = Connection::open_in_memory().unwrap();
         initialize_db(&mut conn).unwrap();
         let locals = read_prompts(&conn).unwrap();

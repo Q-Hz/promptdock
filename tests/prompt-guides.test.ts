@@ -4,15 +4,16 @@ import test from "node:test";
 import { SnippetSession, templateDiagnostics } from "../src/lib/optional-snippets.ts";
 import { setLanguage } from "../src/lib/i18n.ts";
 import { VARIABLE_EXAMPLE_KINDS, variableExample } from "../src/lib/variable-examples.ts";
+import { acceptanceBody } from "./browser/optional-snippet-fixtures.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const defaults = JSON.parse(read("../src-tauri/src/default-prompts.json"));
 
 for (const [locale, title] of [["zh", "提示词标准化"], ["en", "Prompt Standardization"]]) {
-  test(`${locale} bundled syntax guide matches the reusable guide and only fills its invocation inputs`, () => {
-    const guide = read(`../examples/promptdock-syntax-guide.${locale}.md`);
+  test(`${locale} bundled syntax guide only fills its invocation inputs`, () => {
     const prompt = defaults.prompts.find((p: { title: string }) => p.title === title);
-    assert.equal(prompt.body.replace(/\r\n/g, "\n"), guide);
+    assert.ok(prompt, "The bundled guide must exist");
+    const guide = prompt.body.replace(/\r\n/g, "\n");
     const session = new SnippetSession(guide);
     assert.deepEqual(session.variables.map(v => v.name), ["source_prompt", "note_language", "note"], "Only the source, language and notes create fields");
     assert.equal(session.variables[1].type, "select");
@@ -31,7 +32,7 @@ for (const [locale, title] of [["zh", "提示词标准化"], ["en", "Prompt Stan
   });
 
   test(`${locale} guide's complete teaching example converts into a valid working template`, () => {
-    const guide = read(`../examples/promptdock-syntax-guide.${locale}.md`);
+    const guide = defaults.prompts.find((p: { title: string }) => p.title === title).body.replace(/\r\n/g, "\n");
     const sample = guide.split("\n").filter(line => line.startsWith(">"))
       .map(line => line.replace(/^> ?/, "")).join("\n")
       .replace(/\{([^{}]+)\}/g, "{{$1}}");
@@ -46,26 +47,20 @@ for (const [locale, title] of [["zh", "提示词标准化"], ["en", "Prompt Stan
   });
 }
 
-test("importable acceptance prompt exercises defaults, shared references, conditional fields and a toggle", () => {
-  const document = JSON.parse(read("../examples/optional-snippets-test.json"));
-  assert.equal(document.format, "promptdock");
-  assert.equal(document.version, 1);
-  assert.equal(document.prompts.length, 1);
-  assert.equal(document.prompts[0].title, "可选片段功能验收");
-  assert.ok(!defaults.prompts.some((p: { id: string }) => p.id === document.prompts[0].id));
-  const session = new SnippetSession(document.prompts[0].body);
+test("synthetic acceptance template exercises defaults, shared references, conditional fields and a toggle", () => {
+  const session = new SnippetSession(acceptanceBody);
   assert.deepEqual(templateDiagnostics(session.template), []);
-  assert.deepEqual(session.selections["附加修复"], ["0", "2"]);
-  assert.deepEqual(session.selections["输出说明"], []);
+  assert.deepEqual(session.selections.checks, ["0", "2"]);
+  assert.deepEqual(session.selections.summary, []);
   assert.equal(session.entries.filter(e => e.kind === "group").length, 2);
-  assert.equal(session.values["符号"], undefined);
-  session.toggle("附加修复", "1");
-  session.values["符号"] = "u_0";
-  session.toggle("附加修复", "1");
-  session.toggle("附加修复", "1");
-  assert.equal(session.values["符号"], "u_0");
-  assert.deepEqual(session.selections["附加修复"], ["0", "2", "1"]);
-  assert.equal(session.variables.filter(v => v.name === "语言").length, 1);
+  assert.equal(session.values.symbol, undefined);
+  session.toggle("checks", "1");
+  session.values.symbol = "u_0";
+  session.toggle("checks", "1");
+  session.toggle("checks", "1");
+  assert.equal(session.values.symbol, "u_0");
+  assert.deepEqual(session.selections.checks, ["0", "2", "1"]);
+  assert.equal(session.variables.filter(v => v.name === "language").length, 1);
   assert.equal((session.render().match(/u_0/g) ?? []).length, 2);
   assert.doesNotMatch(session.render(), /:::|\{\{/);
 });

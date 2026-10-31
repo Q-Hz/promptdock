@@ -20,6 +20,8 @@ import InterfaceTour from "./InterfaceTour.vue";
 import VariableExamplesModal from "./VariableExamplesModal.vue";
 import TemplateDiagnostics from "./TemplateDiagnostics.vue";
 import PromptBodyEditor from "./PromptBodyEditor.vue";
+import ManagerBodyPreview from "./ManagerBodyPreview.vue";
+import { LauncherPreviewPreference as PreviewPreference } from "../lib/launcher-preview-preference";
 import { parseSnippetTemplate, templateDiagnostics, templateVariableHints } from "../lib/optional-snippets";
 import ConfirmLeaveDialog from "./ConfirmLeaveDialog.vue";
 import ImportComparePage from "./import/ImportComparePage.vue";
@@ -70,6 +72,22 @@ const editing = ref<Prompt>(emptyPrompt());
 const editorTemplate = computed(() => parseSnippetTemplate(editing.value.body));
 const editorShowVarHint = computed(() => templateVariableHints(editorTemplate.value));
 const editorDiagnostics = computed(() => templateDiagnostics(editorTemplate.value));
+const managerPreviewOpen = ref(false);
+const managerPreviewError = ref("");
+const bodyWorkspace = ref<HTMLElement | null>(null);
+const managerPreviewPreference = new PreviewPreference({
+  read: () => api.getUiPrefs("manager.markdownPreviewOpen"),
+  write: value => api.setUiPrefs("manager.markdownPreviewOpen", value),
+});
+
+function toggleManagerPreview() {
+  managerPreviewOpen.value = !managerPreviewOpen.value;
+  managerPreviewError.value = "";
+  void managerPreviewPreference.save(managerPreviewOpen.value).catch(() => {
+    managerPreviewError.value = t("managerPreviewPreferenceFailed");
+  });
+  if (!managerPreviewOpen.value) void nextTick(() => bodyWorkspace.value?.querySelector("textarea")?.focus());
+}
 
 const importSession = ref<ImportPrecheck | null>(null);
 const importing = ref(false);
@@ -806,6 +824,11 @@ onMounted(async () => {
   window.addEventListener("keydown", handleWindowKeydown);
   await api.setManagerGuardReady(true);
   try {
+    managerPreviewOpen.value = await managerPreviewPreference.restore();
+  } catch {
+    managerPreviewError.value = t("managerPreviewPreferenceFailed");
+  }
+  try {
     layout.value = parseLayout(await api.getUiPrefs(LAYOUT_PREFS_KEY));
   } catch {
     layout.value = defaultLayout();
@@ -829,6 +852,7 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleWindowKeydown);
   navObserver?.disconnect();
   void flushLayout().catch(() => undefined);
+  void managerPreviewPreference.flush().catch(() => undefined);
   void api.setManagerGuardReady(false);
 });
 
@@ -1306,6 +1330,13 @@ function handleBeforeUnload(event: BeforeUnloadEvent) {
 async function resolveLeaveWithLayout(): Promise<boolean> {
   if (!(await resolveLeave())) return false;
   try {
+    await managerPreviewPreference.flush();
+  } catch {
+    managerPreviewError.value = t("managerPreviewPreferenceFailed");
+    alert(managerPreviewError.value);
+    return false;
+  }
+  try {
     await flushLayout();
     return true;
   } catch {
@@ -1629,12 +1660,32 @@ async function handleQuitRequest() {
                   @update:model-value="layout.editorRatio = $event"
                 >
                   <template #first>
-                    <div data-onboarding-target="variables" class="flex h-full min-h-0 flex-col gap-1.5">
+                    <div ref="bodyWorkspace" data-onboarding-target="variables" class="flex h-full min-h-0 flex-col gap-1.5">
+                      <div class="flex shrink-0 items-center justify-end gap-2">
+                        <span v-if="managerPreviewError" role="status" class="text-xs text-red-600 dark:text-red-400">{{ managerPreviewError }}</span>
+                        <button type="button" data-manager-preview-toggle :aria-pressed="managerPreviewOpen" aria-controls="manager-body-preview"
+                          class="inline-flex h-8 w-24 shrink-0 items-center justify-center gap-1.5 rounded-md border px-3 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 motion-reduce:transition-none"
+                          :class="managerPreviewOpen
+                            ? 'border-blue-200 bg-blue-50 text-blue-700 hover:border-blue-300 hover:bg-blue-100 active:bg-blue-200 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:border-blue-600 dark:hover:bg-blue-900/50 dark:active:bg-blue-900/70'
+                            : 'border-neutral-300 bg-white text-neutral-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 active:bg-blue-100 dark:border-neutral-600 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:border-blue-600 dark:hover:bg-blue-950/40 dark:hover:text-blue-300 dark:active:bg-blue-900/50'"
+                          @click="toggleManagerPreview">
+                          <svg v-if="managerPreviewOpen" aria-hidden="true" class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m15 5 4 4M4 20l4-1 12-12a2.83 2.83 0 0 0-4-4L4 15z" />
+                          </svg>
+                          <svg v-else aria-hidden="true" class="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                          <span>{{ t(managerPreviewOpen ? 'managerReturnToEditor' : 'managerPreview') }}</span>
+                        </button>
+                      </div>
                       <PromptBodyEditor
+                        v-show="!managerPreviewOpen"
                         v-model="editing.body"
                         :placeholder="t('bodyPlaceholder')"
                         :label="t('fieldBody')"
                       />
+                      <ManagerBodyPreview v-if="managerPreviewOpen" :source="editing.body" />
                       <div class="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500 dark:text-neutral-400">
                         <span>{{ t("variableHelpText") }}</span>
                         <button

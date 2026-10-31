@@ -58,3 +58,7 @@ src-tauri/icons/图标文件与使用位置说明.md
 .codex/
 .claude/
 .workbuddy/
+
+# 本地测试资料
+examples/
+test-examples/

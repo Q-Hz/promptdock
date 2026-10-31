@@ -1,4 +1,14 @@
 // Synthetic requirements only; no user prompts or database access.
+export const acceptanceBody = [
+  "# {{task=Preview check}}", "{{language=[English|中文]}}", "{{note}}",
+  "{{@checks}}", "Again:", "{{@checks}}", "{{@summary}}",
+  ":::options checks", ":::option [x] First", "- First check.",
+  ":::option [ ] Symbol", "- Use {{symbol=u}}.",
+  ":::option [x] Third", "- Third check.", ":::end",
+  ":::options summary", ":::option [ ] Summary",
+  "- {{language=[English|中文]}}: {{details=Explain changes}}.", ":::end",
+].join("\n");
+
 export const snippetBodies = {
   snippets: [
     "# Snippet result", "{{language=中文}}", "{{@checks}}", "Again:", "{{@checks}}", "End.",
