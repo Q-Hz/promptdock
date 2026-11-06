@@ -1,4 +1,5 @@
 // agent-browser eval -b; synthetic IPC with real Vue mount/unmount and blur events.
+// Open launcher-preview.html?variables=one to exercise the variable form.
 (async () => {
   const passed = [];
   const expect = (condition, label) => { if (!condition) throw new Error(label); passed.push(label); };

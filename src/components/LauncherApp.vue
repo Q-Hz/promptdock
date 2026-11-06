@@ -33,6 +33,7 @@ const varValues = computed(() => snippetSession.value?.values ?? {});
 const expandedSnippets = ref<Record<string, boolean>>({});
 const resultText = ref("");
 let generatedText = "";
+let resultBackStage: "search" | "variables" = "variables";
 let returning = false;
 const previewOpen = ref(false);
 const previewHtml = computed(() => renderPreviewMarkdown(resultText.value));
@@ -277,8 +278,13 @@ function reset() {
 function choose(p: Prompt) {
   searchScrollTop = searchList.value?.scrollTop ?? 0;
   selectedId.value = p.id;
-  snippetSession.value = new SnippetSession(p.body);
+  const session = new SnippetSession(p.body);
+  snippetSession.value = session;
   expandedSnippets.value = {};
+  if (session.diagnostics.length === 0 && session.entries.length === 0) {
+    generate();
+    return;
+  }
   const active: Record<string, number> = Object.create(null);
   for (const v of vars.value) {
     if (v.type === "multi") active[v.name] = 0;
@@ -333,6 +339,7 @@ function generate() {
   }
   resultText.value = snippetSession.value.render();
   generatedText = resultText.value;
+  resultBackStage = stage.value === "search" ? "search" : "variables";
   stage.value = "result";
   errorMessage.value = "";
   focusedVar.value = null;
@@ -418,7 +425,7 @@ async function requestBack() {
       : from === "result" && resultText.value !== generatedText;
     if (changed && await openLauncherBackDialog() !== "discard") return;
     if (stage.value !== from) return;
-    const action = launcherBackAction(from);
+    const action = launcherBackAction(from, resultBackStage);
     if (action === "hide") await api.hideMain();
     else if (action === "show-search") {
       resultText.value = "";
@@ -458,7 +465,7 @@ function onKeydown(e: KeyboardEvent) {
       if (p) choose(p);
     } else if (stage.value === "variables") {
       generate();
-    } else {
+    } else if (!e.repeat || resultBackStage === "variables") {
       copyAndClose();
     }
     return;
@@ -557,7 +564,6 @@ function onKeydown(e: KeyboardEvent) {
         <TemplateDiagnostics :diagnostics="templateErrors" class="mb-3 max-h-32 shrink-0 overflow-y-auto" />
         <div data-variable-workspace class="variable-workspace flex min-h-0 flex-1 gap-3" :class="{ 'has-preview': previewOpen }">
         <div ref="variablesViewport" data-launcher-variables class="min-h-0 min-w-0 flex-1 overflow-y-auto" :style="{ '--launcher-text-height': `${textVariableHeight}px` }">
-          <div v-if="variableEntries.length === 0 && canGenerate" class="text-sm text-neutral-400">{{ t("noVariables") }}</div>
           <div data-launcher-fields class="flex flex-col gap-3">
             <template v-for="entry in variableEntries" :key="entry.kind === 'variable' ? `v:${entry.variable.name}` : `g:${entry.group.name}`">
               <VariableField

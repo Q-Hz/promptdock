@@ -17,6 +17,9 @@ const variableBodies: Record<string, string> = {
   "syntax-guide-zh": bundledDefaults.prompts.find(prompt => prompt.title === "提示词标准化")!.body,
   "syntax-guide-en": bundledDefaults.prompts.find(prompt => prompt.title === "Prompt Standardization")!.body,
   one: "{{text}}",
+  "one-default": "{{text=initial}}",
+  "unused-snippet": "# Static result\n:::options unused\n:::option [x] Unused\n{{note}}\n:::end",
+  "snippet-switch": "Before\n{{@note}}\n:::options note\n:::option [ ] Add note\nExtra text\n:::end",
   two: "{{source}}\n{{request=default request}}",
   three: "{{one}}\n{{two}}\n{{three}}",
   mixed: "{{source}}\n{{choice=[a|b]}}\n{{request=default request}}\n{{multi+=[x|y]}}",
@@ -53,6 +56,8 @@ const fixture = {
   writeDelay: 0,
   writes: [] as string[],
   quitReplies: [] as boolean[],
+  clipboardWrites: [] as string[],
+  usedPrompts: [] as string[],
   emit: (name: string) => listeners.get(name)?.({ payload: null }),
 };
 (window as any).__launcherFixture = fixture;
@@ -85,6 +90,14 @@ const fixture = {
       }
       if (command === "set_launcher_preview") {
         document.documentElement.dataset.previewWidth = String(args.open);
+        return;
+      }
+      if (command === "copy_text") {
+        fixture.clipboardWrites.push(args.text);
+        return;
+      }
+      if (command === "mark_used") {
+        fixture.usedPrompts.push(args.id);
         return;
       }
       if (command === "hide_main") {

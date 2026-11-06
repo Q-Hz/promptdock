@@ -4,9 +4,13 @@ import test from "node:test";
 import { launcherBackAction, snapshotVariables, variablesChanged } from "../src/lib/launcher-navigation.ts";
 
 test("back navigation can step from result through variables to search", () => {
-  assert.equal(launcherBackAction("result"), "show-variables");
-  assert.equal(launcherBackAction("variables"), "show-search");
-  assert.equal(launcherBackAction("search"), "hide");
+  assert.equal(launcherBackAction("result", "variables"), "show-variables");
+  assert.equal(launcherBackAction("variables", "variables"), "show-search");
+  assert.equal(launcherBackAction("search", "variables"), "hide");
+});
+
+test("a result opened directly from search returns to search", () => {
+  assert.equal(launcherBackAction("result", "search"), "show-search");
 });
 
 test("variable baseline detects text, select and multi changes and restoration", () => {

@@ -23,8 +23,8 @@ export function variablesChanged(current: VariableValues, baseline: VariableValu
 
 export type LauncherBackAction = "hide" | "show-search" | "show-variables";
 
-export function launcherBackAction(stage: LauncherStage): LauncherBackAction {
+export function launcherBackAction(stage: LauncherStage, resultBackStage: "search" | "variables"): LauncherBackAction {
   if (stage === "search") return "hide";
-  if (stage === "variables") return "show-search";
-  return "show-variables";
+  if (stage === "result" && resultBackStage === "variables") return "show-variables";
+  return "show-search";
 }
