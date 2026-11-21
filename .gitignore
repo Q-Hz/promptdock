@@ -48,12 +48,16 @@ src-tauri/icons/图标文件与使用位置说明.md
 *.bak
 *.dmp
 *.pdb
+/.startup-diagnostics/
 
 # 本地图标设计与一次性处理工具（正式生成资源位于 src-tauri/icons/）
 /scripts/process-app-icon.py
 
 
 # agents
+/AGENTS.md
+/CLAUDE.md
+/skills-lock.json
 .agents/
 .codex/
 .claude/
