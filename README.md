@@ -15,6 +15,10 @@
 
 [Project repository](https://github.com/Q-Hz/promptdock) · [Download installers](https://github.com/Q-Hz/promptdock/releases)
 
+
+https://github.com/user-attachments/assets/1badaf1c-1128-4e90-9651-d0d72a40251b
+
+
 </div>
 
 ---
